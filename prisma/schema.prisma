@@ -1,0 +1,47 @@
+// Prisma Schema for AI-powered Support Helpdesk
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Ticket model - core entity of the helpdesk
+model Ticket {
+  id           String   @id @default(cuid())
+  subject      String
+  description  String   @db.Text
+
+  // AI-classified fields
+  category     String   @default("Other")      // Billing | Bug | Feature Request | HR | Other
+  assignedTeam String   @default("Support")    // Development | Billing | HR | Support
+  priority     String   @default("Medium")     // Low | Medium | High
+  draftResponse String? @db.Text              // AI-generated draft response
+
+  // Workflow
+  status       String   @default("Open")       // Open | In Progress | Resolved
+
+  // Metadata
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@map("tickets")
+}
+
+// User model for team members and admins
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  password  String                           // bcrypt hashed
+  role      String   @default("TeamMember")  // Admin | TeamMember
+  team      String?                          // Development | Billing | HR | Support (null for Admin)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("users")
+}
