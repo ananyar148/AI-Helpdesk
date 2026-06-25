@@ -13,7 +13,7 @@ import LoadingSpinner from './LoadingSpinner';
 const STATUS_OPTIONS = ['Open', 'In Progress', 'Resolved'];
 const TEAM_OPTIONS = ['Development', 'Billing', 'HR', 'Support'];
 
-export default function TicketTable({ tickets: initialTickets, isAdmin = false }) {
+export default function TicketTable({ tickets: initialTickets, isAdmin = false, onClearFilters, hasActiveFilters = false }) {
   const [tickets, setTickets] = useState(initialTickets);
   const [updating, setUpdating] = useState(null); // ticket id being updated
   const [expandedId, setExpandedId] = useState(null); // expanded row for draft response
@@ -78,8 +78,25 @@ export default function TicketTable({ tickets: initialTickets, isAdmin = false }
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
             d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
         </svg>
-        <p className="font-medium">No tickets found</p>
-        <p className="text-sm mt-1">Tickets will appear here when submitted.</p>
+        {hasActiveFilters ? (
+          <>
+            <p className="font-medium text-gray-700">No tickets match your filters</p>
+            <p className="text-sm mt-1 mb-4">Try adjusting or clearing your filters to see tickets.</p>
+            {onClearFilters && (
+              <button
+                onClick={onClearFilters}
+                className="btn-primary text-sm"
+              >
+                Clear all filters
+              </button>
+            )}
+          </>
+        ) : (
+          <>
+            <p className="font-medium">No tickets found</p>
+            <p className="text-sm mt-1">Tickets will appear here when submitted.</p>
+          </>
+        )}
       </div>
     );
   }

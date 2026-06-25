@@ -1,8 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // Disable output file tracing symlinks — prevents EINVAL errors on OneDrive/network drives
   experimental: {
-    // App Router is stable in Next.js 14+
+    outputFileTracingDisableSourceBase: true,
   },
 };
 

@@ -197,7 +197,12 @@ export default function AdminPage() {
                 />
               </div>
 
-              <TicketTable tickets={filteredTickets} isAdmin={true} />
+              <TicketTable
+                tickets={filteredTickets}
+                isAdmin={true}
+                hasActiveFilters={!!(filters.status || filters.category || filters.priority || filters.team)}
+                onClearFilters={() => setFilters({ status: '', category: '', priority: '', team: '' })}
+              />
             </div>
           </>
         )}

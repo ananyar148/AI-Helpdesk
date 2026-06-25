@@ -161,7 +161,12 @@ export default function DashboardPage() {
                 />
               </div>
 
-              <TicketTable tickets={filteredTickets} isAdmin={false} />
+              <TicketTable
+                tickets={filteredTickets}
+                isAdmin={false}
+                hasActiveFilters={!!(filters.status || filters.category || filters.priority)}
+                onClearFilters={() => setFilters({ status: '', category: '', priority: '', team: '' })}
+              />
             </div>
           </>
         )}
