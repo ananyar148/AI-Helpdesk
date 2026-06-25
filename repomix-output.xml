@@ -1,0 +1,3160 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+.env.example
+.gitignore
+app/admin/page.jsx
+app/api/auth/login/route.js
+app/api/auth/logout/route.js
+app/api/auth/me/route.js
+app/api/tickets/[id]/route.js
+app/api/tickets/route.js
+app/components/FilterBar.jsx
+app/components/LoadingSpinner.jsx
+app/components/Navbar.jsx
+app/components/StatsCards.jsx
+app/components/StatusBadge.jsx
+app/components/TicketTable.jsx
+app/dashboard/page.jsx
+app/error.jsx
+app/globals.css
+app/layout.js
+app/login/page.jsx
+app/not-found.jsx
+app/page.jsx
+lib/auth.js
+lib/classifier.js
+lib/prisma.js
+middleware.js
+next.config.js
+package.json
+postcss.config.js
+prisma/schema.prisma
+prisma/seed.js
+README.md
+tailwind.config.js
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path=".gitignore">
+# Dependencies
+node_modules/
+
+# Next.js build output
+.next/
+out/
+
+# Environment variables (never commit these)
+.env
+.env.local
+.env.production
+
+# Prisma generated files
+prisma/migrations/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log
+npm-debug.log*
+</file>
+
+<file path="app/admin/page.jsx">
+'use client';
+
+/**
+ * Admin Dashboard — /admin
+ * Protected (Admin only). Full access to all tickets with filtering and reassignment.
+ */
+
+import { useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
+import Navbar from '../components/Navbar';
+import TicketTable from '../components/TicketTable';
+import StatsCards from '../components/StatsCards';
+import FilterBar from '../components/FilterBar';
+import LoadingSpinner from '../components/LoadingSpinner';
+
+export default function AdminPage() {
+  const router = useRouter();
+  const [user, setUser] = useState(null);
+  const [tickets, setTickets] = useState([]);
+  const [filteredTickets, setFilteredTickets] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [filters, setFilters] = useState({
+    status: '',
+    category: '',
+    priority: '',
+    team: '',
+  });
+
+  // Auth check
+  useEffect(() => {
+    fetch('/api/auth/me')
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((data) => {
+        if (!data.user || data.user.role !== 'Admin') {
+          router.push('/login');
+          return;
+        }
+        setUser(data.user);
+      })
+      .catch(() => router.push('/login'));
+  }, [router]);
+
+  // Fetch ALL tickets
+  const fetchTickets = useCallback(async () => {
+    if (!user) return;
+    setLoading(true);
+    setError('');
+    try {
+      const res = await fetch('/api/tickets');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to load tickets');
+      setTickets(data.tickets);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    fetchTickets();
+  }, [fetchTickets]);
+
+  // Client-side filtering
+  useEffect(() => {
+    let result = [...tickets];
+    if (filters.status) result = result.filter((t) => t.status === filters.status);
+    if (filters.category) result = result.filter((t) => t.category === filters.category);
+    if (filters.priority) result = result.filter((t) => t.priority === filters.priority);
+    if (filters.team) result = result.filter((t) => t.assignedTeam === filters.team);
+    setFilteredTickets(result);
+  }, [tickets, filters]);
+
+  const handleFilterChange = (key, value) => {
+    setFilters((prev) => ({ ...prev, [key]: value }));
+  };
+
+  // Team distribution breakdown
+  const teamBreakdown = () => {
+    const teams = ['Development', 'Billing', 'HR', 'Support'];
+    return teams.map((team) => ({
+      team,
+      count: tickets.filter((t) => t.assignedTeam === team).length,
+    }));
+  };
+
+  if (!user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <LoadingSpinner size="lg" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <Navbar />
+
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Page Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
+          <div>
+            <div className="flex items-center gap-3 mb-1">
+              <h1 className="text-2xl font-bold text-gray-900">Admin Dashboard</h1>
+              <span className="badge bg-purple-100 text-purple-700">Admin</span>
+            </div>
+            <p className="text-gray-500 text-sm">
+              Welcome, <span className="font-medium text-gray-700">{user.name}</span>. Full access to all tickets across all teams.
+            </p>
+          </div>
+          <button
+            onClick={fetchTickets}
+            disabled={loading}
+            className="btn-secondary self-start sm:self-auto"
+          >
+            {loading ? <LoadingSpinner size="sm" /> : (
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            )}
+            Refresh
+          </button>
+        </div>
+
+        {error && (
+          <div className="alert-error mb-6 flex items-center gap-2">
+            <svg className="w-4 h-4 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+            </svg>
+            {error}
+            <button onClick={fetchTickets} className="ml-auto text-xs underline">Retry</button>
+          </div>
+        )}
+
+        {loading && tickets.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-24 gap-3">
+            <LoadingSpinner size="lg" />
+            <p className="text-gray-500 text-sm">Loading all tickets…</p>
+          </div>
+        ) : (
+          <>
+            {/* Stats */}
+            <div className="mb-6">
+              <StatsCards tickets={tickets} />
+            </div>
+
+            {/* Team Breakdown */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
+              {teamBreakdown().map(({ team, count }) => {
+                const colorMap = {
+                  Development: 'border-blue-200 bg-blue-50',
+                  Billing: 'border-emerald-200 bg-emerald-50',
+                  HR: 'border-pink-200 bg-pink-50',
+                  Support: 'border-orange-200 bg-orange-50',
+                };
+                const textMap = {
+                  Development: 'text-blue-700',
+                  Billing: 'text-emerald-700',
+                  HR: 'text-pink-700',
+                  Support: 'text-orange-700',
+                };
+                return (
+                  <button
+                    key={team}
+                    onClick={() => handleFilterChange('team', filters.team === team ? '' : team)}
+                    className={`p-4 rounded-xl border-2 text-left transition-all ${
+                      filters.team === team
+                        ? colorMap[team] + ' ring-2 ring-offset-1 ring-current'
+                        : 'border-gray-200 bg-white hover:border-gray-300'
+                    }`}
+                  >
+                    <p className={`text-2xl font-bold ${filters.team === team ? textMap[team] : 'text-gray-900'}`}>
+                      {count}
+                    </p>
+                    <p className="text-xs text-gray-500 mt-0.5">{team} Team</p>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Filters + Table */}
+            <div className="card">
+              <div className="flex flex-col gap-4 mb-6">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <h2 className="text-lg font-semibold text-gray-900">
+                    All Tickets
+                    <span className="ml-2 text-sm font-normal text-gray-500">
+                      ({filteredTickets.length}{filteredTickets.length !== tickets.length ? ` of ${tickets.length}` : ''})
+                    </span>
+                  </h2>
+                </div>
+                <FilterBar
+                  filters={filters}
+                  onChange={handleFilterChange}
+                  isAdmin={true}
+                />
+              </div>
+
+              <TicketTable tickets={filteredTickets} isAdmin={true} />
+            </div>
+          </>
+        )}
+      </main>
+    </div>
+  );
+}
+</file>
+
+<file path="app/api/auth/login/route.js">
+/**
+ * /api/auth/login
+ * POST - Authenticate a user and set auth cookie.
+ */
+
+import { NextResponse } from 'next/server';
+import bcrypt from 'bcryptjs';
+import prisma from '../../../../lib/prisma';
+import { signToken } from '../../../../lib/auth';
+
+export async function POST(request) {
+  try {
+    const body = await request.json();
+    const { email, password } = body;
+
+    if (!email || !password) {
+      return NextResponse.json(
+        { error: 'Email and password are required.' },
+        { status: 400 }
+      );
+    }
+
+    // Find user by email
+    const user = await prisma.user.findUnique({
+      where: { email: email.toLowerCase().trim() },
+    });
+
+    if (!user) {
+      return NextResponse.json(
+        { error: 'Invalid email or password.' },
+        { status: 401 }
+      );
+    }
+
+    // Compare password
+    const isValid = await bcrypt.compare(password, user.password);
+    if (!isValid) {
+      return NextResponse.json(
+        { error: 'Invalid email or password.' },
+        { status: 401 }
+      );
+    }
+
+    // Sign JWT
+    const token = await signToken({
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      team: user.team,
+    });
+
+    // Build response and set HTTP-only cookie
+    const response = NextResponse.json({
+      success: true,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        team: user.team,
+      },
+    });
+
+    response.cookies.set('auth_token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 7 * 24 * 60 * 60, // 7 days
+      path: '/',
+    });
+
+    return response;
+  } catch (err) {
+    console.error('POST /api/auth/login error:', err);
+    return NextResponse.json(
+      { error: 'An unexpected error occurred.' },
+      { status: 500 }
+    );
+  }
+}
+</file>
+
+<file path="app/api/auth/logout/route.js">
+/**
+ * /api/auth/logout
+ * POST - Clear the auth cookie.
+ */
+
+import { NextResponse } from 'next/server';
+
+export async function POST() {
+  const response = NextResponse.json({ success: true, message: 'Logged out.' });
+
+  response.cookies.set('auth_token', '', {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    maxAge: 0, // expire immediately
+    path: '/',
+  });
+
+  return response;
+}
+</file>
+
+<file path="app/api/auth/me/route.js">
+/**
+ * /api/auth/me
+ * GET - Return the current authenticated user from cookie.
+ */
+
+import { NextResponse } from 'next/server';
+import { getUserFromRequest } from '../../../../lib/auth';
+
+export async function GET(request) {
+  const user = await getUserFromRequest(request);
+
+  if (!user) {
+    return NextResponse.json({ user: null }, { status: 401 });
+  }
+
+  return NextResponse.json({
+    user: {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      team: user.team,
+    },
+  });
+}
+</file>
+
+<file path="app/api/tickets/[id]/route.js">
+/**
+ * /api/tickets/[id]
+ * GET    - Fetch single ticket (protected)
+ * PATCH  - Update ticket status or team (protected)
+ * DELETE - Delete ticket (admin only)
+ */
+
+import { NextResponse } from 'next/server';
+import prisma from '../../../../lib/prisma';
+import { getUserFromRequest } from '../../../../lib/auth';
+
+// GET /api/tickets/[id]
+export async function GET(request, { params }) {
+  try {
+    const user = await getUserFromRequest(request);
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized.' }, { status: 401 });
+    }
+
+    const ticket = await prisma.ticket.findUnique({
+      where: { id: params.id },
+    });
+
+    if (!ticket) {
+      return NextResponse.json({ error: 'Ticket not found.' }, { status: 404 });
+    }
+
+    // Team members can only see their team's tickets
+    if (user.role === 'TeamMember' && ticket.assignedTeam !== user.team) {
+      return NextResponse.json({ error: 'Access denied.' }, { status: 403 });
+    }
+
+    return NextResponse.json({ ticket });
+  } catch (err) {
+    console.error('GET /api/tickets/[id] error:', err);
+    return NextResponse.json({ error: 'Failed to fetch ticket.' }, { status: 500 });
+  }
+}
+
+// PATCH /api/tickets/[id] — update status and/or assignedTeam
+export async function PATCH(request, { params }) {
+  try {
+    const user = await getUserFromRequest(request);
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized.' }, { status: 401 });
+    }
+
+    const body = await request.json();
+    const { status, assignedTeam } = body;
+
+    const ticket = await prisma.ticket.findUnique({
+      where: { id: params.id },
+    });
+
+    if (!ticket) {
+      return NextResponse.json({ error: 'Ticket not found.' }, { status: 404 });
+    }
+
+    // Team members can only update tickets assigned to their team
+    if (user.role === 'TeamMember' && ticket.assignedTeam !== user.team) {
+      return NextResponse.json({ error: 'Access denied.' }, { status: 403 });
+    }
+
+    // Only admins can reassign tickets
+    if (assignedTeam && user.role !== 'Admin') {
+      return NextResponse.json(
+        { error: 'Only admins can reassign tickets.' },
+        { status: 403 }
+      );
+    }
+
+    // Validate status value
+    const validStatuses = ['Open', 'In Progress', 'Resolved'];
+    if (status && !validStatuses.includes(status)) {
+      return NextResponse.json(
+        { error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` },
+        { status: 400 }
+      );
+    }
+
+    // Validate team value
+    const validTeams = ['Development', 'Billing', 'HR', 'Support'];
+    if (assignedTeam && !validTeams.includes(assignedTeam)) {
+      return NextResponse.json(
+        { error: `Invalid team. Must be one of: ${validTeams.join(', ')}` },
+        { status: 400 }
+      );
+    }
+
+    const updateData = {};
+    if (status) updateData.status = status;
+    if (assignedTeam) updateData.assignedTeam = assignedTeam;
+
+    const updated = await prisma.ticket.update({
+      where: { id: params.id },
+      data: updateData,
+    });
+
+    return NextResponse.json({ success: true, ticket: updated });
+  } catch (err) {
+    console.error('PATCH /api/tickets/[id] error:', err);
+    return NextResponse.json({ error: 'Failed to update ticket.' }, { status: 500 });
+  }
+}
+
+// DELETE /api/tickets/[id] — admin only
+export async function DELETE(request, { params }) {
+  try {
+    const user = await getUserFromRequest(request);
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized.' }, { status: 401 });
+    }
+
+    if (user.role !== 'Admin') {
+      return NextResponse.json({ error: 'Admin access required.' }, { status: 403 });
+    }
+
+    await prisma.ticket.delete({ where: { id: params.id } });
+
+    return NextResponse.json({ success: true, message: 'Ticket deleted.' });
+  } catch (err) {
+    console.error('DELETE /api/tickets/[id] error:', err);
+    return NextResponse.json({ error: 'Failed to delete ticket.' }, { status: 500 });
+  }
+}
+</file>
+
+<file path="app/api/tickets/route.js">
+/**
+ * /api/tickets
+ * POST - Submit a new support ticket (public)
+ * GET  - List tickets (protected; filtered by role/team)
+ */
+
+import { NextResponse } from 'next/server';
+import prisma from '../../../lib/prisma';
+import { classifyTicket } from '../../../lib/classifier';
+import { getUserFromRequest } from '../../../lib/auth';
+
+// POST /api/tickets — public ticket submission
+export async function POST(request) {
+  try {
+    const body = await request.json();
+    const { subject, description } = body;
+
+    // Basic validation
+    if (!subject || !description) {
+      return NextResponse.json(
+        { error: 'Subject and description are required.' },
+        { status: 400 }
+      );
+    }
+
+    if (subject.trim().length < 5) {
+      return NextResponse.json(
+        { error: 'Subject must be at least 5 characters.' },
+        { status: 400 }
+      );
+    }
+
+    if (description.trim().length < 10) {
+      return NextResponse.json(
+        { error: 'Description must be at least 10 characters.' },
+        { status: 400 }
+      );
+    }
+
+    // Fetch recent tickets for near-duplicate detection (last 200)
+    const recentTickets = await prisma.ticket.findMany({
+      take: 200,
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        subject: true,
+        description: true,
+        category: true,
+        assignedTeam: true,
+        priority: true,
+        draftResponse: true,
+      },
+    });
+
+    // Run the classification pipeline
+    const classification = await classifyTicket(
+      subject.trim(),
+      description.trim(),
+      recentTickets
+    );
+
+    // Save the enriched ticket to PostgreSQL
+    const ticket = await prisma.ticket.create({
+      data: {
+        subject: subject.trim(),
+        description: description.trim(),
+        category: classification.category,
+        assignedTeam: classification.assignedTeam,
+        priority: classification.priority,
+        draftResponse: classification.draftResponse || null,
+        status: 'Open',
+      },
+    });
+
+    return NextResponse.json(
+      {
+        success: true,
+        ticket,
+        classificationSource: classification.source,
+        message: 'Your ticket has been submitted successfully.',
+      },
+      { status: 201 }
+    );
+  } catch (err) {
+    console.error('POST /api/tickets error:', err);
+    return NextResponse.json(
+      { error: 'An unexpected error occurred. Please try again.' },
+      { status: 500 }
+    );
+  }
+}
+
+// GET /api/tickets — protected; returns tickets filtered by user role/team
+export async function GET(request) {
+  try {
+    const user = await getUserFromRequest(request);
+
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized.' }, { status: 401 });
+    }
+
+    const { searchParams } = new URL(request.url);
+    const status = searchParams.get('status');
+    const category = searchParams.get('category');
+    const priority = searchParams.get('priority');
+    const team = searchParams.get('team');
+
+    // Build where clause
+    const where = {};
+
+    // Team members only see their team's tickets
+    if (user.role === 'TeamMember' && user.team) {
+      where.assignedTeam = user.team;
+    }
+
+    // Optional filters (admin can also filter by team)
+    if (status) where.status = status;
+    if (category) where.category = category;
+    if (priority) where.priority = priority;
+    if (team && user.role === 'Admin') where.assignedTeam = team;
+
+    const tickets = await prisma.ticket.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return NextResponse.json({ tickets });
+  } catch (err) {
+    console.error('GET /api/tickets error:', err);
+    return NextResponse.json(
+      { error: 'Failed to fetch tickets.' },
+      { status: 500 }
+    );
+  }
+}
+</file>
+
+<file path="app/components/FilterBar.jsx">
+'use client';
+
+/**
+ * FilterBar — filter controls for admin dashboard.
+ * Props:
+ *   filters: { status, category, priority, team }
+ *   onChange: (key, value) => void
+ *   isAdmin: boolean
+ */
+export default function FilterBar({ filters, onChange, isAdmin = false }) {
+  const statuses = ['', 'Open', 'In Progress', 'Resolved'];
+  const categories = ['', 'Billing', 'Bug', 'Feature Request', 'HR', 'Other'];
+  const priorities = ['', 'High', 'Medium', 'Low'];
+  const teams = ['', 'Development', 'Billing', 'HR', 'Support'];
+
+  const selectClass =
+    'text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-400 text-gray-700';
+
+  return (
+    <div className="flex flex-wrap gap-3 items-center">
+      <span className="text-sm font-medium text-gray-500">Filter:</span>
+
+      <select
+        value={filters.status}
+        onChange={(e) => onChange('status', e.target.value)}
+        className={selectClass}
+        aria-label="Filter by status"
+      >
+        {statuses.map((s) => (
+          <option key={s} value={s}>{s || 'All Statuses'}</option>
+        ))}
+      </select>
+
+      <select
+        value={filters.category}
+        onChange={(e) => onChange('category', e.target.value)}
+        className={selectClass}
+        aria-label="Filter by category"
+      >
+        {categories.map((c) => (
+          <option key={c} value={c}>{c || 'All Categories'}</option>
+        ))}
+      </select>
+
+      <select
+        value={filters.priority}
+        onChange={(e) => onChange('priority', e.target.value)}
+        className={selectClass}
+        aria-label="Filter by priority"
+      >
+        {priorities.map((p) => (
+          <option key={p} value={p}>{p || 'All Priorities'}</option>
+        ))}
+      </select>
+
+      {isAdmin && (
+        <select
+          value={filters.team}
+          onChange={(e) => onChange('team', e.target.value)}
+          className={selectClass}
+          aria-label="Filter by team"
+        >
+          {teams.map((t) => (
+            <option key={t} value={t}>{t || 'All Teams'}</option>
+          ))}
+        </select>
+      )}
+
+      {(filters.status || filters.category || filters.priority || filters.team) && (
+        <button
+          onClick={() => {
+            onChange('status', '');
+            onChange('category', '');
+            onChange('priority', '');
+            onChange('team', '');
+          }}
+          className="text-sm text-red-500 hover:text-red-700 flex items-center gap-1"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+          Clear filters
+        </button>
+      )}
+    </div>
+  );
+}
+</file>
+
+<file path="app/components/LoadingSpinner.jsx">
+'use client';
+
+/**
+ * LoadingSpinner — animated SVG spinner.
+ * Size: 'sm' | 'md' | 'lg'
+ */
+export default function LoadingSpinner({ size = 'md', className = '' }) {
+  const sizes = {
+    sm: 'w-4 h-4',
+    md: 'w-6 h-6',
+    lg: 'w-10 h-10',
+  };
+
+  return (
+    <svg
+      className={`animate-spin text-blue-600 ${sizes[size]} ${className}`}
+      xmlns="http://www.w3.org/2000/svg"
+      fill="none"
+      viewBox="0 0 24 24"
+      aria-label="Loading"
+    >
+      <circle
+        className="opacity-25"
+        cx="12"
+        cy="12"
+        r="10"
+        stroke="currentColor"
+        strokeWidth="4"
+      />
+      <path
+        className="opacity-75"
+        fill="currentColor"
+        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+      />
+    </svg>
+  );
+}
+</file>
+
+<file path="app/components/Navbar.jsx">
+'use client';
+
+/**
+ * Navbar component
+ * Shows navigation links and the current user's info with a logout button.
+ */
+
+import { useState, useEffect } from 'react';
+import Link from 'next/link';
+import { useRouter, usePathname } from 'next/navigation';
+
+export default function Navbar() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const [user, setUser] = useState(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  // Fetch current user on mount
+  useEffect(() => {
+    fetch('/api/auth/me')
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => {
+        if (data?.user) setUser(data.user);
+      })
+      .catch(() => {});
+  }, [pathname]);
+
+  const handleLogout = async () => {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    setUser(null);
+    router.push('/login');
+  };
+
+  const navLinks = user
+    ? user.role === 'Admin'
+      ? [
+          { href: '/admin', label: 'Admin Dashboard' },
+          { href: '/', label: 'Client Portal' },
+        ]
+      : [
+          { href: '/dashboard', label: 'My Dashboard' },
+          { href: '/', label: 'Client Portal' },
+        ]
+    : [
+        { href: '/', label: 'Submit Ticket' },
+        { href: '/login', label: 'Team Login' },
+      ];
+
+  return (
+    <nav className="bg-white border-b border-gray-200 sticky top-0 z-50 shadow-sm">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex items-center justify-between h-16">
+          {/* Logo */}
+          <Link href="/" className="flex items-center gap-2">
+            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
+              <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M18.364 5.636l-3.536 3.536m0 5.656l3.536 3.536M9.172 9.172L5.636 5.636m3.536 9.192l-3.536 3.536M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-5 0a4 4 0 11-8 0 4 4 0 018 0z" />
+              </svg>
+            </div>
+            <span className="text-lg font-bold text-gray-900">HelpDesk</span>
+            <span className="hidden sm:block text-xs text-blue-600 font-medium bg-blue-50 px-2 py-0.5 rounded-full">AI</span>
+          </Link>
+
+          {/* Desktop Links */}
+          <div className="hidden md:flex items-center gap-1">
+            {navLinks.map((link) => (
+              <Link
+                key={link.href}
+                href={link.href}
+                className={`px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
+                  pathname === link.href
+                    ? 'text-blue-600 bg-blue-50'
+                    : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+                }`}
+              >
+                {link.label}
+              </Link>
+            ))}
+          </div>
+
+          {/* User Info + Logout */}
+          <div className="hidden md:flex items-center gap-3">
+            {user ? (
+              <>
+                <div className="text-right">
+                  <p className="text-sm font-medium text-gray-900">{user.name}</p>
+                  <p className="text-xs text-gray-500">{user.role}{user.team ? ` · ${user.team}` : ''}</p>
+                </div>
+                <div className="w-8 h-8 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center text-sm font-bold">
+                  {user.name.charAt(0).toUpperCase()}
+                </div>
+                <button
+                  onClick={handleLogout}
+                  className="text-sm text-gray-500 hover:text-red-600 transition-colors px-2 py-1.5 rounded-lg hover:bg-red-50"
+                >
+                  Logout
+                </button>
+              </>
+            ) : (
+              <Link
+                href="/login"
+                className="btn-primary text-xs px-4 py-2"
+              >
+                Team Login
+              </Link>
+            )}
+          </div>
+
+          {/* Mobile menu button */}
+          <button
+            onClick={() => setMenuOpen(!menuOpen)}
+            className="md:hidden p-2 rounded-lg text-gray-500 hover:bg-gray-100"
+            aria-label="Toggle menu"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              {menuOpen
+                ? <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                : <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              }
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      {/* Mobile Menu */}
+      {menuOpen && (
+        <div className="md:hidden border-t border-gray-100 bg-white px-4 pb-4 pt-2">
+          {navLinks.map((link) => (
+            <Link
+              key={link.href}
+              href={link.href}
+              onClick={() => setMenuOpen(false)}
+              className="block py-2 text-sm text-gray-700 hover:text-blue-600"
+            >
+              {link.label}
+            </Link>
+          ))}
+          {user && (
+            <button
+              onClick={() => { handleLogout(); setMenuOpen(false); }}
+              className="block w-full text-left py-2 text-sm text-red-600"
+            >
+              Logout
+            </button>
+          )}
+        </div>
+      )}
+    </nav>
+  );
+}
+</file>
+
+<file path="app/components/StatsCards.jsx">
+'use client';
+
+/**
+ * StatsCards — summary statistics row for dashboards.
+ */
+export default function StatsCards({ tickets }) {
+  const total = tickets.length;
+  const open = tickets.filter((t) => t.status === 'Open').length;
+  const inProgress = tickets.filter((t) => t.status === 'In Progress').length;
+  const resolved = tickets.filter((t) => t.status === 'Resolved').length;
+  const highPriority = tickets.filter((t) => t.priority === 'High').length;
+
+  const stats = [
+    {
+      label: 'Total Tickets',
+      value: total,
+      icon: '🎫',
+      color: 'bg-blue-50 text-blue-600',
+    },
+    {
+      label: 'Open',
+      value: open,
+      icon: '📬',
+      color: 'bg-sky-50 text-sky-600',
+    },
+    {
+      label: 'In Progress',
+      value: inProgress,
+      icon: '⚙️',
+      color: 'bg-yellow-50 text-yellow-600',
+    },
+    {
+      label: 'Resolved',
+      value: resolved,
+      icon: '✅',
+      color: 'bg-green-50 text-green-600',
+    },
+    {
+      label: 'High Priority',
+      value: highPriority,
+      icon: '🔴',
+      color: 'bg-red-50 text-red-600',
+    },
+  ];
+
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+      {stats.map((stat) => (
+        <div key={stat.label} className="card py-4 px-5">
+          <div className={`inline-flex items-center justify-center w-9 h-9 rounded-lg text-lg mb-2 ${stat.color}`}>
+            <span>{stat.icon}</span>
+          </div>
+          <p className="text-2xl font-bold text-gray-900">{stat.value}</p>
+          <p className="text-xs text-gray-500 mt-0.5">{stat.label}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+</file>
+
+<file path="app/components/StatusBadge.jsx">
+'use client';
+
+/**
+ * StatusBadge — colour-coded pill for ticket status.
+ */
+export function StatusBadge({ status }) {
+  const map = {
+    Open: 'badge-open',
+    'In Progress': 'badge-in-progress',
+    Resolved: 'badge-resolved',
+  };
+  return (
+    <span className={map[status] || 'badge bg-gray-100 text-gray-600'}>
+      {status}
+    </span>
+  );
+}
+
+/**
+ * PriorityBadge — colour-coded pill for ticket priority.
+ */
+export function PriorityBadge({ priority }) {
+  const map = {
+    High: 'priority-high',
+    Medium: 'priority-medium',
+    Low: 'priority-low',
+  };
+  return (
+    <span className={map[priority] || 'badge bg-gray-100 text-gray-600'}>
+      {priority}
+    </span>
+  );
+}
+
+/**
+ * CategoryBadge — colour-coded pill for ticket category.
+ */
+export function CategoryBadge({ category }) {
+  const colorMap = {
+    Billing: 'bg-emerald-100 text-emerald-700',
+    Bug: 'bg-red-100 text-red-700',
+    'Feature Request': 'bg-indigo-100 text-indigo-700',
+    HR: 'bg-pink-100 text-pink-700',
+    Other: 'bg-gray-100 text-gray-600',
+  };
+  return (
+    <span className={`badge ${colorMap[category] || 'bg-gray-100 text-gray-600'}`}>
+      {category}
+    </span>
+  );
+}
+
+/**
+ * TeamBadge — colour-coded pill for assigned team.
+ */
+export function TeamBadge({ team }) {
+  const colorMap = {
+    Development: 'bg-blue-100 text-blue-700',
+    Billing: 'bg-emerald-100 text-emerald-700',
+    HR: 'bg-pink-100 text-pink-700',
+    Support: 'bg-orange-100 text-orange-700',
+  };
+  return (
+    <span className={`badge ${colorMap[team] || 'bg-gray-100 text-gray-600'}`}>
+      {team}
+    </span>
+  );
+}
+</file>
+
+<file path="app/components/TicketTable.jsx">
+'use client';
+
+/**
+ * TicketTable component
+ * Displays a responsive table of tickets with status update controls.
+ * Used by both /dashboard and /admin.
+ */
+
+import { useState } from 'react';
+import { StatusBadge, PriorityBadge, CategoryBadge, TeamBadge } from './StatusBadge';
+import LoadingSpinner from './LoadingSpinner';
+
+const STATUS_OPTIONS = ['Open', 'In Progress', 'Resolved'];
+const TEAM_OPTIONS = ['Development', 'Billing', 'HR', 'Support'];
+
+export default function TicketTable({ tickets: initialTickets, isAdmin = false }) {
+  const [tickets, setTickets] = useState(initialTickets);
+  const [updating, setUpdating] = useState(null); // ticket id being updated
+  const [expandedId, setExpandedId] = useState(null); // expanded row for draft response
+  const [error, setError] = useState('');
+
+  const handleStatusChange = async (ticketId, newStatus) => {
+    setUpdating(ticketId);
+    setError('');
+    try {
+      const res = await fetch(`/api/tickets/${ticketId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to update');
+
+      setTickets((prev) =>
+        prev.map((t) => (t.id === ticketId ? { ...t, status: newStatus } : t))
+      );
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setUpdating(null);
+    }
+  };
+
+  const handleTeamChange = async (ticketId, newTeam) => {
+    setUpdating(ticketId);
+    setError('');
+    try {
+      const res = await fetch(`/api/tickets/${ticketId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assignedTeam: newTeam }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to reassign');
+
+      setTickets((prev) =>
+        prev.map((t) => (t.id === ticketId ? { ...t, assignedTeam: newTeam } : t))
+      );
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setUpdating(null);
+    }
+  };
+
+  const formatDate = (dateStr) => {
+    return new Date(dateStr).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+  };
+
+  if (tickets.length === 0) {
+    return (
+      <div className="text-center py-16 text-gray-500">
+        <svg className="w-12 h-12 mx-auto mb-3 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+            d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+        </svg>
+        <p className="font-medium">No tickets found</p>
+        <p className="text-sm mt-1">Tickets will appear here when submitted.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {error && (
+        <div className="alert-error mb-4 flex items-center gap-2">
+          <svg className="w-4 h-4 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+          </svg>
+          {error}
+        </div>
+      )}
+
+      {/* Desktop Table */}
+      <div className="hidden md:block overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-gray-200 text-left">
+              <th className="pb-3 pr-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Subject</th>
+              <th className="pb-3 pr-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Category</th>
+              <th className="pb-3 pr-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Team</th>
+              <th className="pb-3 pr-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Priority</th>
+              <th className="pb-3 pr-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
+              {isAdmin && (
+                <th className="pb-3 pr-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Reassign</th>
+              )}
+              <th className="pb-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Date</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {tickets.map((ticket) => (
+              <>
+                <tr
+                  key={ticket.id}
+                  className="hover:bg-gray-50 cursor-pointer transition-colors"
+                  onClick={() => setExpandedId(expandedId === ticket.id ? null : ticket.id)}
+                >
+                  <td className="py-3 pr-4">
+                    <div className="font-medium text-gray-900 truncate max-w-[200px]" title={ticket.subject}>
+                      {ticket.subject}
+                    </div>
+                    <div className="text-xs text-gray-500 truncate max-w-[200px] mt-0.5">
+                      {ticket.description.substring(0, 60)}…
+                    </div>
+                  </td>
+                  <td className="py-3 pr-4">
+                    <CategoryBadge category={ticket.category} />
+                  </td>
+                  <td className="py-3 pr-4">
+                    <TeamBadge team={ticket.assignedTeam} />
+                  </td>
+                  <td className="py-3 pr-4">
+                    <PriorityBadge priority={ticket.priority} />
+                  </td>
+                  <td className="py-3 pr-4" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-center gap-2">
+                      {updating === ticket.id ? (
+                        <LoadingSpinner size="sm" />
+                      ) : (
+                        <select
+                          value={ticket.status}
+                          onChange={(e) => handleStatusChange(ticket.id, e.target.value)}
+                          className="text-xs border border-gray-200 rounded-md px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400 cursor-pointer"
+                          aria-label={`Update status for ticket ${ticket.subject}`}
+                        >
+                          {STATUS_OPTIONS.map((s) => (
+                            <option key={s} value={s}>{s}</option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
+                  </td>
+                  {isAdmin && (
+                    <td className="py-3 pr-4" onClick={(e) => e.stopPropagation()}>
+                      {updating === ticket.id ? (
+                        <LoadingSpinner size="sm" />
+                      ) : (
+                        <select
+                          value={ticket.assignedTeam}
+                          onChange={(e) => handleTeamChange(ticket.id, e.target.value)}
+                          className="text-xs border border-gray-200 rounded-md px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400 cursor-pointer"
+                          aria-label={`Reassign team for ticket ${ticket.subject}`}
+                        >
+                          {TEAM_OPTIONS.map((t) => (
+                            <option key={t} value={t}>{t}</option>
+                          ))}
+                        </select>
+                      )}
+                    </td>
+                  )}
+                  <td className="py-3 text-gray-500 text-xs whitespace-nowrap">
+                    {formatDate(ticket.createdAt)}
+                  </td>
+                </tr>
+
+                {/* Expanded row: full description + draft response */}
+                {expandedId === ticket.id && (
+                  <tr key={`${ticket.id}-expanded`} className="bg-blue-50">
+                    <td colSpan={isAdmin ? 7 : 6} className="px-4 py-4">
+                      <div className="grid md:grid-cols-2 gap-4">
+                        <div>
+                          <p className="text-xs font-semibold text-gray-500 uppercase mb-1">Full Description</p>
+                          <p className="text-sm text-gray-700">{ticket.description}</p>
+                        </div>
+                        {ticket.draftResponse && (
+                          <div>
+                            <p className="text-xs font-semibold text-blue-600 uppercase mb-1 flex items-center gap-1">
+                              <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+                                <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                              </svg>
+                              AI Draft Response
+                            </p>
+                            <p className="text-sm text-gray-700 italic">{ticket.draftResponse}</p>
+                          </div>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Mobile Cards */}
+      <div className="md:hidden space-y-4">
+        {tickets.map((ticket) => (
+          <div key={ticket.id} className="border border-gray-200 rounded-lg p-4 bg-white">
+            <div className="flex items-start justify-between gap-2 mb-3">
+              <h3 className="font-medium text-gray-900 text-sm">{ticket.subject}</h3>
+              <StatusBadge status={ticket.status} />
+            </div>
+            <p className="text-xs text-gray-500 mb-3 line-clamp-2">{ticket.description}</p>
+            <div className="flex flex-wrap gap-2 mb-3">
+              <CategoryBadge category={ticket.category} />
+              <TeamBadge team={ticket.assignedTeam} />
+              <PriorityBadge priority={ticket.priority} />
+            </div>
+            <div className="flex items-center gap-2">
+              {updating === ticket.id ? (
+                <LoadingSpinner size="sm" />
+              ) : (
+                <select
+                  value={ticket.status}
+                  onChange={(e) => handleStatusChange(ticket.id, e.target.value)}
+                  className="text-xs border border-gray-200 rounded-md px-2 py-1 bg-white flex-1"
+                >
+                  {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
+              )}
+              {isAdmin && (
+                <select
+                  value={ticket.assignedTeam}
+                  onChange={(e) => handleTeamChange(ticket.id, e.target.value)}
+                  className="text-xs border border-gray-200 rounded-md px-2 py-1 bg-white flex-1"
+                  disabled={updating === ticket.id}
+                >
+                  {TEAM_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
+                </select>
+              )}
+            </div>
+            {ticket.draftResponse && (
+              <div className="mt-3 pt-3 border-t border-gray-100">
+                <p className="text-xs font-semibold text-blue-600 mb-1">AI Draft Response</p>
+                <p className="text-xs text-gray-600 italic">{ticket.draftResponse}</p>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+</file>
+
+<file path="app/dashboard/page.jsx">
+'use client';
+
+/**
+ * Team Dashboard — /dashboard
+ * Protected. Shows only tickets assigned to the logged-in user's team.
+ */
+
+import { useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
+import Navbar from '../components/Navbar';
+import TicketTable from '../components/TicketTable';
+import StatsCards from '../components/StatsCards';
+import FilterBar from '../components/FilterBar';
+import LoadingSpinner from '../components/LoadingSpinner';
+import { TeamBadge } from '../components/StatusBadge';
+
+export default function DashboardPage() {
+  const router = useRouter();
+  const [user, setUser] = useState(null);
+  const [tickets, setTickets] = useState([]);
+  const [filteredTickets, setFilteredTickets] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [filters, setFilters] = useState({
+    status: '',
+    category: '',
+    priority: '',
+    team: '',
+  });
+
+  // Fetch current user
+  useEffect(() => {
+    fetch('/api/auth/me')
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((data) => {
+        if (!data.user) {
+          router.push('/login');
+          return;
+        }
+        // Admins should use /admin
+        if (data.user.role === 'Admin') {
+          router.push('/admin');
+          return;
+        }
+        setUser(data.user);
+      })
+      .catch(() => router.push('/login'));
+  }, [router]);
+
+  // Fetch tickets for this team
+  const fetchTickets = useCallback(async () => {
+    if (!user) return;
+    setLoading(true);
+    setError('');
+    try {
+      const res = await fetch('/api/tickets');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to load tickets');
+      setTickets(data.tickets);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    fetchTickets();
+  }, [fetchTickets]);
+
+  // Apply client-side filters
+  useEffect(() => {
+    let result = [...tickets];
+    if (filters.status) result = result.filter((t) => t.status === filters.status);
+    if (filters.category) result = result.filter((t) => t.category === filters.category);
+    if (filters.priority) result = result.filter((t) => t.priority === filters.priority);
+    setFilteredTickets(result);
+  }, [tickets, filters]);
+
+  const handleFilterChange = (key, value) => {
+    setFilters((prev) => ({ ...prev, [key]: value }));
+  };
+
+  if (!user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <LoadingSpinner size="lg" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <Navbar />
+
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Page Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
+          <div>
+            <div className="flex items-center gap-3 mb-1">
+              <h1 className="text-2xl font-bold text-gray-900">Team Dashboard</h1>
+              {user.team && <TeamBadge team={user.team} />}
+            </div>
+            <p className="text-gray-500 text-sm">
+              Welcome back, <span className="font-medium text-gray-700">{user.name}</span>.
+              {user.team
+                ? ` Showing tickets assigned to the ${user.team} team.`
+                : ' Showing all assigned tickets.'}
+            </p>
+          </div>
+          <button
+            onClick={fetchTickets}
+            disabled={loading}
+            className="btn-secondary self-start sm:self-auto"
+            aria-label="Refresh tickets"
+          >
+            {loading ? <LoadingSpinner size="sm" /> : (
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            )}
+            Refresh
+          </button>
+        </div>
+
+        {error && (
+          <div className="alert-error mb-6 flex items-center gap-2">
+            <svg className="w-4 h-4 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+            </svg>
+            {error}
+            <button onClick={fetchTickets} className="ml-auto text-xs underline">Retry</button>
+          </div>
+        )}
+
+        {loading && tickets.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-24 gap-3">
+            <LoadingSpinner size="lg" />
+            <p className="text-gray-500 text-sm">Loading tickets…</p>
+          </div>
+        ) : (
+          <>
+            {/* Stats */}
+            <div className="mb-8">
+              <StatsCards tickets={tickets} />
+            </div>
+
+            {/* Filters + Table */}
+            <div className="card">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+                <h2 className="text-lg font-semibold text-gray-900">
+                  Tickets
+                  <span className="ml-2 text-sm font-normal text-gray-500">
+                    ({filteredTickets.length}{filteredTickets.length !== tickets.length ? ` of ${tickets.length}` : ''})
+                  </span>
+                </h2>
+                <FilterBar
+                  filters={filters}
+                  onChange={handleFilterChange}
+                  isAdmin={false}
+                />
+              </div>
+
+              <TicketTable tickets={filteredTickets} isAdmin={false} />
+            </div>
+          </>
+        )}
+      </main>
+    </div>
+  );
+}
+</file>
+
+<file path="app/error.jsx">
+'use client';
+
+export default function Error({ error, reset }) {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
+      <div className="text-center max-w-md">
+        <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+          <svg className="w-8 h-8 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+        </div>
+        <h2 className="text-xl font-semibold text-gray-900 mb-2">Something went wrong</h2>
+        <p className="text-gray-500 text-sm mb-6">{error?.message || 'An unexpected error occurred.'}</p>
+        <button onClick={reset} className="btn-primary">Try Again</button>
+      </div>
+    </div>
+  );
+}
+</file>
+
+<file path="app/globals.css">
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom base styles */
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-gray-50 text-gray-900 antialiased;
+  }
+
+  * {
+    @apply box-border;
+  }
+}
+
+/* Reusable component classes */
+@layer components {
+  /* Form inputs */
+  .input-field {
+    @apply w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm
+           focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent
+           placeholder-gray-400 transition-colors duration-200;
+  }
+
+  .input-label {
+    @apply block text-sm font-medium text-gray-700 mb-1.5;
+  }
+
+  /* Buttons */
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 px-5 py-2.5
+           bg-blue-600 hover:bg-blue-700 text-white font-medium text-sm
+           rounded-lg transition-colors duration-200 disabled:opacity-50
+           disabled:cursor-not-allowed focus:outline-none focus:ring-2
+           focus:ring-blue-500 focus:ring-offset-2;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 px-5 py-2.5
+           bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium text-sm
+           rounded-lg transition-colors duration-200 focus:outline-none
+           focus:ring-2 focus:ring-gray-400 focus:ring-offset-2;
+  }
+
+  .btn-danger {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2
+           bg-red-600 hover:bg-red-700 text-white font-medium text-sm
+           rounded-lg transition-colors duration-200 focus:outline-none
+           focus:ring-2 focus:ring-red-500 focus:ring-offset-2;
+  }
+
+  /* Card */
+  .card {
+    @apply bg-white rounded-xl shadow-sm border border-gray-200 p-6;
+  }
+
+  /* Status badges */
+  .badge {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+  }
+
+  .badge-open {
+    @apply badge bg-blue-100 text-blue-700;
+  }
+
+  .badge-in-progress {
+    @apply badge bg-yellow-100 text-yellow-700;
+  }
+
+  .badge-resolved {
+    @apply badge bg-green-100 text-green-700;
+  }
+
+  /* Priority badges */
+  .priority-high {
+    @apply badge bg-red-100 text-red-700;
+  }
+
+  .priority-medium {
+    @apply badge bg-orange-100 text-orange-700;
+  }
+
+  .priority-low {
+    @apply badge bg-gray-100 text-gray-600;
+  }
+
+  /* Category badges */
+  .category-badge {
+    @apply badge bg-purple-100 text-purple-700;
+  }
+
+  /* Alert / notification */
+  .alert-success {
+    @apply p-4 rounded-lg bg-green-50 border border-green-200 text-green-800 text-sm;
+  }
+
+  .alert-error {
+    @apply p-4 rounded-lg bg-red-50 border border-red-200 text-red-800 text-sm;
+  }
+
+  .alert-info {
+    @apply p-4 rounded-lg bg-blue-50 border border-blue-200 text-blue-800 text-sm;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+</file>
+
+<file path="app/layout.js">
+import './globals.css';
+
+export const metadata = {
+  title: 'HelpDesk — AI-Powered Support',
+  description: 'Submit and manage support tickets with AI-assisted classification and response drafting.',
+};
+
+export default function RootLayout({ children }) {
+  return (
+    <html lang="en">
+      <body className="min-h-screen bg-gray-50">
+        {children}
+      </body>
+    </html>
+  );
+}
+</file>
+
+<file path="app/login/page.jsx">
+'use client';
+
+/**
+ * Login Page — /login
+ * Authenticates team members and admins.
+ */
+
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import Link from 'next/link';
+import LoadingSpinner from '../components/LoadingSpinner';
+
+export default function LoginPage() {
+  const router = useRouter();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim(), password }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.error || 'Login failed. Please try again.');
+        return;
+      }
+
+      // Redirect based on role
+      if (data.user.role === 'Admin') {
+        router.push('/admin');
+      } else {
+        router.push('/dashboard');
+      }
+    } catch {
+      setError('Network error. Please check your connection.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Quick-fill demo accounts
+  const demoAccounts = [
+    { label: 'Admin', email: 'admin@helpdesk.com', password: 'password123' },
+    { label: 'Dev Team', email: 'dev@helpdesk.com', password: 'password123' },
+    { label: 'Billing', email: 'billing@helpdesk.com', password: 'password123' },
+    { label: 'HR', email: 'hr@helpdesk.com', password: 'password123' },
+  ];
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50 flex items-center justify-center px-4 py-12">
+      <div className="w-full max-w-md">
+        {/* Logo */}
+        <div className="text-center mb-8">
+          <Link href="/" className="inline-flex items-center gap-2 mb-6">
+            <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center shadow">
+              <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M18.364 5.636l-3.536 3.536m0 5.656l3.536 3.536M9.172 9.172L5.636 5.636m3.536 9.192l-3.536 3.536M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-5 0a4 4 0 11-8 0 4 4 0 018 0z" />
+              </svg>
+            </div>
+            <span className="text-xl font-bold text-gray-900">HelpDesk</span>
+          </Link>
+          <h1 className="text-2xl font-bold text-gray-900">Team Login</h1>
+          <p className="text-gray-500 text-sm mt-1">Sign in to access your dashboard</p>
+        </div>
+
+        {/* Form Card */}
+        <div className="card shadow-md">
+          {error && (
+            <div className="alert-error mb-5 flex items-start gap-2">
+              <svg className="w-4 h-4 mt-0.5 flex-shrink-0 text-red-500" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+              </svg>
+              {error}
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit} noValidate>
+            {/* Email */}
+            <div className="mb-4">
+              <label htmlFor="email" className="input-label">Email Address</label>
+              <input
+                id="email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@helpdesk.com"
+                className="input-field"
+                required
+                autoComplete="email"
+                disabled={loading}
+              />
+            </div>
+
+            {/* Password */}
+            <div className="mb-6">
+              <label htmlFor="password" className="input-label">Password</label>
+              <div className="relative">
+                <input
+                  id="password"
+                  type={showPassword ? 'text' : 'password'}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Enter your password"
+                  className="input-field pr-10"
+                  required
+                  autoComplete="current-password"
+                  disabled={loading}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                >
+                  {showPassword ? (
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                    </svg>
+                  ) : (
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                    </svg>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading || !email || !password}
+              className="btn-primary w-full py-3"
+            >
+              {loading ? (
+                <>
+                  <LoadingSpinner size="sm" />
+                  Signing in…
+                </>
+              ) : (
+                'Sign In'
+              )}
+            </button>
+          </form>
+        </div>
+
+        {/* Demo Accounts */}
+        <div className="mt-6 card bg-gray-50 border-gray-200">
+          <p className="text-xs font-semibold text-gray-500 uppercase mb-3">Demo Accounts (password: password123)</p>
+          <div className="grid grid-cols-2 gap-2">
+            {demoAccounts.map((acc) => (
+              <button
+                key={acc.label}
+                onClick={() => { setEmail(acc.email); setPassword(acc.password); }}
+                className="text-left p-2.5 rounded-lg border border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-colors"
+              >
+                <p className="text-xs font-medium text-gray-700">{acc.label}</p>
+                <p className="text-xs text-gray-400 truncate">{acc.email}</p>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <p className="text-center text-sm text-gray-500 mt-6">
+          Not a team member?{' '}
+          <Link href="/" className="text-blue-600 hover:text-blue-700 font-medium">
+            Submit a ticket
+          </Link>
+        </p>
+      </div>
+    </div>
+  );
+}
+</file>
+
+<file path="app/not-found.jsx">
+import Link from 'next/link';
+
+export default function NotFound() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
+      <div className="text-center">
+        <h1 className="text-6xl font-bold text-blue-600 mb-4">404</h1>
+        <h2 className="text-2xl font-semibold text-gray-900 mb-2">Page Not Found</h2>
+        <p className="text-gray-500 mb-8">The page you are looking for does not exist.</p>
+        <Link href="/" className="btn-primary">
+          Back to Home
+        </Link>
+      </div>
+    </div>
+  );
+}
+</file>
+
+<file path="app/page.jsx">
+'use client';
+
+/**
+ * Client Portal — /
+ * Public page where customers submit support tickets.
+ */
+
+import { useState } from 'react';
+import Navbar from './components/Navbar';
+import LoadingSpinner from './components/LoadingSpinner';
+
+const MAX_SUBJECT = 150;
+const MAX_DESCRIPTION = 2000;
+
+export default function ClientPortal() {
+  const [subject, setSubject] = useState('');
+  const [description, setDescription] = useState('');
+  const [status, setStatus] = useState('idle'); // idle | loading | success | error
+  const [message, setMessage] = useState('');
+  const [ticket, setTicket] = useState(null);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setStatus('loading');
+    setMessage('');
+    setTicket(null);
+
+    try {
+      const res = await fetch('/api/tickets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subject: subject.trim(), description: description.trim() }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setStatus('error');
+        setMessage(data.error || 'Something went wrong. Please try again.');
+        return;
+      }
+
+      setStatus('success');
+      setTicket(data.ticket);
+      setMessage(data.message);
+      setSubject('');
+      setDescription('');
+    } catch {
+      setStatus('error');
+      setMessage('Network error. Please check your connection and try again.');
+    }
+  };
+
+  const handleReset = () => {
+    setStatus('idle');
+    setMessage('');
+    setTicket(null);
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50">
+      <Navbar />
+
+      <main className="max-w-2xl mx-auto px-4 py-12 sm:py-16">
+        {/* Header */}
+        <div className="text-center mb-10">
+          <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-600 rounded-2xl mb-4 shadow-lg">
+            <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M18.364 5.636l-3.536 3.536m0 5.656l3.536 3.536M9.172 9.172L5.636 5.636m3.536 9.192l-3.536 3.536M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-5 0a4 4 0 11-8 0 4 4 0 018 0z" />
+            </svg>
+          </div>
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">Support Center</h1>
+          <p className="text-gray-500 max-w-md mx-auto">
+            Submit your support request and our AI will route it to the right team automatically.
+          </p>
+        </div>
+
+        {/* Success State */}
+        {status === 'success' && ticket && (
+          <div className="card border-green-200 bg-green-50 mb-6">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0">
+                <svg className="w-5 h-5 text-green-600" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                </svg>
+              </div>
+              <div className="flex-1">
+                <h3 className="font-semibold text-green-900 mb-1">Ticket Submitted!</h3>
+                <p className="text-sm text-green-700 mb-4">{message}</p>
+
+                {/* Ticket Details */}
+                <div className="bg-white rounded-lg p-4 border border-green-200 space-y-3">
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div>
+                      <span className="text-gray-500 text-xs uppercase font-medium">Ticket ID</span>
+                      <p className="font-mono text-gray-800 text-xs mt-0.5 truncate">{ticket.id}</p>
+                    </div>
+                    <div>
+                      <span className="text-gray-500 text-xs uppercase font-medium">Assigned To</span>
+                      <p className="font-medium text-gray-800 mt-0.5">{ticket.assignedTeam} Team</p>
+                    </div>
+                    <div>
+                      <span className="text-gray-500 text-xs uppercase font-medium">Category</span>
+                      <p className="font-medium text-gray-800 mt-0.5">{ticket.category}</p>
+                    </div>
+                    <div>
+                      <span className="text-gray-500 text-xs uppercase font-medium">Priority</span>
+                      <p className={`font-medium mt-0.5 ${
+                        ticket.priority === 'High' ? 'text-red-600' :
+                        ticket.priority === 'Medium' ? 'text-orange-600' : 'text-gray-600'
+                      }`}>{ticket.priority}</p>
+                    </div>
+                  </div>
+
+                  {ticket.draftResponse && (
+                    <div className="pt-3 border-t border-gray-100">
+                      <p className="text-xs uppercase font-medium text-blue-600 mb-1 flex items-center gap-1">
+                        <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+                          <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                        </svg>
+                        AI Draft Response
+                      </p>
+                      <p className="text-sm text-gray-700 italic">{ticket.draftResponse}</p>
+                    </div>
+                  )}
+                </div>
+
+                <button onClick={handleReset} className="btn-primary mt-4 text-sm">
+                  Submit Another Ticket
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Form */}
+        {status !== 'success' && (
+          <div className="card shadow-md">
+            <h2 className="text-lg font-semibold text-gray-900 mb-1">Submit a Support Ticket</h2>
+            <p className="text-sm text-gray-500 mb-6">
+              Describe your issue and our AI will classify and route it to the right team.
+            </p>
+
+            {status === 'error' && (
+              <div className="alert-error mb-5 flex items-start gap-2">
+                <svg className="w-4 h-4 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                </svg>
+                {message}
+              </div>
+            )}
+
+            <form onSubmit={handleSubmit} noValidate>
+              {/* Subject */}
+              <div className="mb-5">
+                <label htmlFor="subject" className="input-label">
+                  Subject <span className="text-red-500">*</span>
+                </label>
+                <input
+                  id="subject"
+                  type="text"
+                  value={subject}
+                  onChange={(e) => setSubject(e.target.value)}
+                  maxLength={MAX_SUBJECT}
+                  placeholder="Brief summary of your issue"
+                  className="input-field"
+                  required
+                  disabled={status === 'loading'}
+                  aria-describedby="subject-hint"
+                />
+                <div className="flex justify-between mt-1.5">
+                  <p id="subject-hint" className="text-xs text-gray-400">Be specific and concise</p>
+                  <p className="text-xs text-gray-400">{subject.length}/{MAX_SUBJECT}</p>
+                </div>
+              </div>
+
+              {/* Description */}
+              <div className="mb-6">
+                <label htmlFor="description" className="input-label">
+                  Description <span className="text-red-500">*</span>
+                </label>
+                <textarea
+                  id="description"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  maxLength={MAX_DESCRIPTION}
+                  rows={6}
+                  placeholder="Please provide as much detail as possible — what happened, when it started, steps to reproduce, etc."
+                  className="input-field resize-none"
+                  required
+                  disabled={status === 'loading'}
+                  aria-describedby="desc-hint"
+                />
+                <div className="flex justify-between mt-1.5">
+                  <p id="desc-hint" className="text-xs text-gray-400">More detail helps us resolve your issue faster</p>
+                  <p className="text-xs text-gray-400">{description.length}/{MAX_DESCRIPTION}</p>
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={status === 'loading' || !subject.trim() || !description.trim()}
+                className="btn-primary w-full py-3"
+              >
+                {status === 'loading' ? (
+                  <>
+                    <LoadingSpinner size="sm" />
+                    Analyzing & Submitting…
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                    </svg>
+                    Submit Ticket
+                  </>
+                )}
+              </button>
+            </form>
+          </div>
+        )}
+
+        {/* Feature Highlights */}
+        <div className="mt-10 grid grid-cols-3 gap-4 text-center">
+          {[
+            { icon: '🤖', title: 'AI Classification', desc: 'Auto-routed to the right team' },
+            { icon: '⚡', title: 'Fast Response', desc: 'Draft response generated instantly' },
+            { icon: '🔒', title: 'Secure', desc: 'Your data is protected' },
+          ].map((feat) => (
+            <div key={feat.title} className="py-4">
+              <div className="text-2xl mb-2">{feat.icon}</div>
+              <p className="text-sm font-medium text-gray-700">{feat.title}</p>
+              <p className="text-xs text-gray-400 mt-0.5">{feat.desc}</p>
+            </div>
+          ))}
+        </div>
+      </main>
+    </div>
+  );
+}
+</file>
+
+<file path="lib/auth.js">
+/**
+ * Authentication utilities
+ * JWT-based auth using jose (Edge-compatible).
+ */
+
+import { SignJWT, jwtVerify } from 'jose';
+
+const SECRET_KEY = new TextEncoder().encode(
+  process.env.JWT_SECRET || 'fallback-secret-key'
+);
+
+/**
+ * Sign a JWT token with user payload.
+ * @param {object} payload - User data to embed (id, email, role, team)
+ * @returns {Promise<string>} Signed JWT string
+ */
+export async function signToken(payload) {
+  return new SignJWT(payload)
+    .setProtectedHeader({ alg: 'HS256' })
+    .setIssuedAt()
+    .setExpirationTime('7d')
+    .sign(SECRET_KEY);
+}
+
+/**
+ * Verify and decode a JWT token.
+ * @param {string} token
+ * @returns {Promise<object|null>} Decoded payload or null if invalid
+ */
+export async function verifyToken(token) {
+  try {
+    const { payload } = await jwtVerify(token, SECRET_KEY);
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Get the current user from a request's cookie.
+ * @param {Request} request
+ * @returns {Promise<object|null>} User payload or null
+ */
+export async function getUserFromRequest(request) {
+  const cookieHeader = request.headers.get('cookie') || '';
+  const cookies = Object.fromEntries(
+    cookieHeader.split(';').map((c) => {
+      const [k, ...v] = c.trim().split('=');
+      return [k, v.join('=')];
+    })
+  );
+
+  const token = cookies['auth_token'];
+  if (!token) return null;
+
+  return verifyToken(token);
+}
+</file>
+
+<file path="lib/classifier.js">
+/**
+ * AI Classification Pipeline
+ *
+ * Step 1: Rule-based keyword classifier with confidence scoring.
+ * Step 2: If confidence is low, call Google Gemini for structured classification.
+ * Step 3: Cache check - reuse existing classification for near-duplicate complaints.
+ */
+
+import { GoogleGenerativeAI, SchemaType } from '@google/generative-ai';
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+const CATEGORIES = ['Billing', 'Bug', 'Feature Request', 'HR', 'Other'];
+const TEAMS = ['Development', 'Billing', 'HR', 'Support'];
+const PRIORITIES = ['Low', 'Medium', 'High'];
+
+/** Minimum confidence (0–1) required to skip Gemini */
+const HIGH_CONFIDENCE_THRESHOLD = 0.65;
+
+// ---------------------------------------------------------------------------
+// Keyword Rule Map
+// Each entry: { keywords, category, team, priority, weight }
+// ---------------------------------------------------------------------------
+
+const RULES = [
+  // --- Billing ---
+  {
+    keywords: ['invoice', 'charge', 'payment', 'refund', 'billing', 'overcharged', 'duplicate charge', 'subscription', 'receipt', 'transaction', 'credit card', 'debit', 'money', 'cost', 'price', 'fee', 'bank'],
+    category: 'Billing',
+    team: 'Billing',
+    priority: 'High',
+    weight: 2,
+  },
+  // --- Bug ---
+  {
+    keywords: ['bug', 'crash', 'error', 'broken', 'not working', 'issue', 'glitch', 'freeze', 'hangs', 'failed', 'exception', 'cannot login', "can't login", 'login problem', 'loading', 'blank screen', 'timeout', '500', '404', 'unresponsive'],
+    category: 'Bug',
+    team: 'Development',
+    priority: 'High',
+    weight: 2,
+  },
+  // --- Feature Request ---
+  {
+    keywords: ['feature', 'request', 'add', 'suggestion', 'improve', 'enhancement', 'would be great', 'dark mode', 'would like', 'can you add', 'please add', 'wish', 'support for', 'integration'],
+    category: 'Feature Request',
+    team: 'Development',
+    priority: 'Low',
+    weight: 1.5,
+  },
+  // --- HR ---
+  {
+    keywords: ['leave', 'vacation', 'salary', 'payroll', 'hr', 'human resources', 'employee', 'onboarding', 'termination', 'contract', 'benefits', 'policy', 'sick leave', 'annual leave', 'manager', 'promotion', 'performance review'],
+    category: 'HR',
+    team: 'HR',
+    priority: 'Medium',
+    weight: 2,
+  },
+  // --- Support / General ---
+  {
+    keywords: ['help', 'support', 'question', 'how to', 'unable', 'access', 'account', 'password', 'reset', 'setup', 'configuration', 'guide', 'documentation', 'tutorial'],
+    category: 'Other',
+    team: 'Support',
+    priority: 'Medium',
+    weight: 1,
+  },
+];
+
+// Priority keyword overrides
+const PRIORITY_KEYWORDS = {
+  High: ['urgent', 'critical', 'asap', 'immediately', 'emergency', 'blocking', 'cannot work', 'production down', 'severe'],
+  Low: ['minor', 'low priority', 'whenever', 'not urgent', 'nice to have', 'eventually', 'suggestion'],
+};
+
+// ---------------------------------------------------------------------------
+// Rule-Based Classifier
+// ---------------------------------------------------------------------------
+
+/**
+ * Tokenise text: lowercase, remove punctuation, split into words.
+ */
+function tokenize(text) {
+  return text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean);
+}
+
+/**
+ * Count how many keywords (or phrases) from a list appear in the text.
+ */
+function countMatches(text, keywords) {
+  const lower = text.toLowerCase();
+  return keywords.filter((kw) => lower.includes(kw)).length;
+}
+
+/**
+ * Rule-based keyword classifier.
+ * Returns { category, team, priority, confidence }
+ */
+function keywordClassify(subject, description) {
+  const text = `${subject} ${description}`;
+  const scores = {}; // category → weighted score
+
+  for (const rule of RULES) {
+    const matches = countMatches(text, rule.keywords);
+    if (matches > 0) {
+      const score = matches * rule.weight;
+      scores[rule.category] = (scores[rule.category] || 0) + score;
+    }
+  }
+
+  if (Object.keys(scores).length === 0) {
+    return { category: 'Other', team: 'Support', priority: 'Medium', confidence: 0 };
+  }
+
+  // Pick category with highest score
+  const sorted = Object.entries(scores).sort((a, b) => b[1] - a[1]);
+  const [topCategory, topScore] = sorted[0];
+  const totalScore = sorted.reduce((sum, [, s]) => sum + s, 0);
+  const confidence = totalScore > 0 ? topScore / totalScore : 0;
+
+  // Find the rule for this category to get default team/priority
+  const rule = RULES.find((r) => r.category === topCategory);
+  let team = rule ? rule.team : 'Support';
+  let priority = rule ? rule.priority : 'Medium';
+
+  // Override priority based on urgency keywords
+  if (countMatches(text, PRIORITY_KEYWORDS.High) > 0) priority = 'High';
+  else if (countMatches(text, PRIORITY_KEYWORDS.Low) > 0) priority = 'Low';
+
+  return { category: topCategory, team, priority, confidence };
+}
+
+// ---------------------------------------------------------------------------
+// Gemini Classifier (Structured Output)
+// ---------------------------------------------------------------------------
+
+/**
+ * Call Google Gemini API with a JSON schema for structured output.
+ * @param {string} subject
+ * @param {string} description
+ * @returns {Promise<{category, assignedTeam, priority, draftResponse}>}
+ */
+async function geminiClassify(subject, description) {
+  if (!process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEY === 'your-gemini-api-key-here') {
+    console.warn('⚠️  GEMINI_API_KEY not set — using fallback classification');
+    return null;
+  }
+
+  try {
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+
+    // JSON Schema for structured output
+    const responseSchema = {
+      type: SchemaType.OBJECT,
+      properties: {
+        category: {
+          type: SchemaType.STRING,
+          enum: CATEGORIES,
+          description: 'The category of the support ticket',
+        },
+        priority: {
+          type: SchemaType.STRING,
+          enum: PRIORITIES,
+          description: 'The urgency/priority of the ticket',
+        },
+        assignedTeam: {
+          type: SchemaType.STRING,
+          enum: TEAMS,
+          description: 'The team best suited to handle this ticket',
+        },
+        draftResponse: {
+          type: SchemaType.STRING,
+          description: 'A professional, empathetic draft response for the customer',
+        },
+      },
+      required: ['category', 'priority', 'assignedTeam', 'draftResponse'],
+    };
+
+    const model = genAI.getGenerativeModel({
+      model: 'gemini-1.5-flash',
+      generationConfig: {
+        responseMimeType: 'application/json',
+        responseSchema,
+      },
+    });
+
+    const prompt = `You are a support ticket classifier for a software company.
+    
+Analyze the following support ticket and classify it:
+
+Subject: ${subject}
+Description: ${description}
+
+Classify this ticket with:
+- category: One of ${CATEGORIES.join(', ')}
+- priority: One of ${PRIORITIES.join(', ')} based on urgency and impact
+- assignedTeam: One of ${TEAMS.join(', ')} — Development handles bugs/features, Billing handles payments, HR handles employee matters, Support handles general questions
+- draftResponse: A professional, empathetic response of 2-3 sentences acknowledging the issue and stating next steps`;
+
+    const result = await model.generateContent(prompt);
+    const text = result.response.text();
+    const parsed = JSON.parse(text);
+
+    return {
+      category: parsed.category || 'Other',
+      assignedTeam: parsed.assignedTeam || 'Support',
+      priority: parsed.priority || 'Medium',
+      draftResponse: parsed.draftResponse || '',
+    };
+  } catch (err) {
+    console.error('Gemini API error:', err.message);
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Near-Duplicate Detection
+// ---------------------------------------------------------------------------
+
+/**
+ * Simple similarity score between two strings using word overlap (Jaccard index).
+ * @param {string} a
+ * @param {string} b
+ * @returns {number} 0–1
+ */
+function textSimilarity(a, b) {
+  const setA = new Set(tokenize(a));
+  const setB = new Set(tokenize(b));
+  const intersection = new Set([...setA].filter((x) => setB.has(x)));
+  const union = new Set([...setA, ...setB]);
+  return union.size === 0 ? 0 : intersection.size / union.size;
+}
+
+/**
+ * Check existing tickets for a near-duplicate complaint.
+ * @param {string} subject
+ * @param {string} description
+ * @param {Array} existingTickets - Array of ticket objects from DB
+ * @returns {object|null} Matching ticket or null
+ */
+export function findNearDuplicate(subject, description, existingTickets) {
+  const newText = `${subject} ${description}`;
+
+  for (const ticket of existingTickets) {
+    const existingText = `${ticket.subject} ${ticket.description}`;
+    const similarity = textSimilarity(newText, existingText);
+
+    // Threshold: 70% word overlap considered near-duplicate
+    if (similarity >= 0.7) {
+      return ticket;
+    }
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Main Classification Entry Point
+// ---------------------------------------------------------------------------
+
+/**
+ * Classify a support ticket using the hybrid pipeline.
+ *
+ * Pipeline:
+ *   1. Check existing tickets for near-duplicate → reuse classification
+ *   2. Run keyword classifier → use if confidence ≥ HIGH_CONFIDENCE_THRESHOLD
+ *   3. Call Gemini for structured output → use result
+ *   4. Fall back to keyword result if Gemini fails
+ *
+ * @param {string} subject
+ * @param {string} description
+ * @param {Array} existingTickets - Recent tickets for duplicate check
+ * @returns {Promise<{category, assignedTeam, priority, draftResponse, source}>}
+ */
+export async function classifyTicket(subject, description, existingTickets = []) {
+  // Step 1: Near-duplicate check
+  const duplicate = findNearDuplicate(subject, description, existingTickets);
+  if (duplicate) {
+    console.log('♻️  Reusing classification from near-duplicate ticket:', duplicate.id);
+    return {
+      category: duplicate.category,
+      assignedTeam: duplicate.assignedTeam,
+      priority: duplicate.priority,
+      draftResponse: duplicate.draftResponse,
+      source: 'duplicate',
+    };
+  }
+
+  // Step 2: Keyword classification
+  const keywordResult = keywordClassify(subject, description);
+  console.log(`🔍 Keyword classifier: category=${keywordResult.category}, confidence=${keywordResult.confidence.toFixed(2)}`);
+
+  if (keywordResult.confidence >= HIGH_CONFIDENCE_THRESHOLD) {
+    // High confidence — generate a draft response locally
+    const draftResponse = generateFallbackDraft(keywordResult.category, subject);
+    return {
+      category: keywordResult.category,
+      assignedTeam: keywordResult.team,
+      priority: keywordResult.priority,
+      draftResponse,
+      source: 'keyword',
+    };
+  }
+
+  // Step 3: Low confidence → call Gemini
+  console.log('🤖 Low confidence — calling Gemini API...');
+  const geminiResult = await geminiClassify(subject, description);
+
+  if (geminiResult) {
+    return {
+      ...geminiResult,
+      source: 'gemini',
+    };
+  }
+
+  // Step 4: Gemini failed — use keyword result as fallback
+  console.log('⚠️  Gemini unavailable — using keyword fallback');
+  const draftResponse = generateFallbackDraft(keywordResult.category, subject);
+  return {
+    category: keywordResult.category,
+    assignedTeam: keywordResult.team,
+    priority: keywordResult.priority,
+    draftResponse,
+    source: 'keyword-fallback',
+  };
+}
+
+/**
+ * Generate a simple template draft response based on category.
+ * Used when Gemini is unavailable.
+ */
+function generateFallbackDraft(category, subject) {
+  const drafts = {
+    Billing: `Thank you for contacting us regarding your billing concern: "${subject}". Our billing team will review your account and respond within 1-2 business days.`,
+    Bug: `Thank you for reporting this issue: "${subject}". Our development team has been notified and will investigate immediately. We will provide an update shortly.`,
+    'Feature Request': `Thank you for your feature suggestion: "${subject}". We appreciate your feedback and have logged this request for our product team to review in future planning.`,
+    HR: `Thank you for reaching out to HR regarding "${subject}". Our HR team will review your request and get back to you within 1 business day.`,
+    Other: `Thank you for contacting our support team regarding "${subject}". A team member will review your request and respond within 24-48 hours.`,
+  };
+  return drafts[category] || drafts.Other;
+}
+</file>
+
+<file path="lib/prisma.js">
+/**
+ * Prisma Client singleton
+ * Prevents multiple instances during hot-reloading in development.
+ */
+
+const { PrismaClient } = require('@prisma/client');
+
+const globalForPrisma = globalThis;
+
+const prisma =
+  globalForPrisma.prisma ??
+  new PrismaClient({
+    log: process.env.NODE_ENV === 'development' ? ['error', 'warn'] : ['error'],
+  });
+
+if (process.env.NODE_ENV !== 'production') {
+  globalForPrisma.prisma = prisma;
+}
+
+module.exports = prisma;
+</file>
+
+<file path="middleware.js">
+/**
+ * Next.js Middleware
+ * Protects /dashboard and /admin routes — redirects unauthenticated users.
+ * Restricts /admin to users with role === 'Admin'.
+ */
+
+import { NextResponse } from 'next/server';
+import { verifyToken } from './lib/auth';
+
+export async function middleware(request) {
+  const { pathname } = request.nextUrl;
+
+  // Extract token from cookie
+  const token = request.cookies.get('auth_token')?.value;
+
+  // --- Protect /dashboard ---
+  if (pathname.startsWith('/dashboard')) {
+    if (!token) {
+      return NextResponse.redirect(new URL('/login', request.url));
+    }
+    const user = await verifyToken(token);
+    if (!user) {
+      return NextResponse.redirect(new URL('/login', request.url));
+    }
+  }
+
+  // --- Protect /admin ---
+  if (pathname.startsWith('/admin')) {
+    if (!token) {
+      return NextResponse.redirect(new URL('/login', request.url));
+    }
+    const user = await verifyToken(token);
+    if (!user) {
+      return NextResponse.redirect(new URL('/login', request.url));
+    }
+    if (user.role !== 'Admin') {
+      // Non-admins get redirected to their dashboard
+      return NextResponse.redirect(new URL('/dashboard', request.url));
+    }
+  }
+
+  return NextResponse.next();
+}
+
+export const config = {
+  matcher: ['/dashboard/:path*', '/admin/:path*'],
+};
+</file>
+
+<file path="next.config.js">
+/** @type {import('next').NextConfig} */
+const nextConfig = {
+  reactStrictMode: true,
+  experimental: {
+    // App Router is stable in Next.js 14+
+  },
+};
+
+module.exports = nextConfig;
+</file>
+
+<file path="package.json">
+{
+  "name": "helpdesk",
+  "version": "1.0.0",
+  "description": "AI-powered Support Helpdesk built with Next.js",
+  "main": "index.js",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:seed": "node prisma/seed.js",
+    "db:studio": "prisma studio"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@google/generative-ai": "^0.21.0",
+    "@prisma/client": "5.22.0",
+    "autoprefixer": "^10.4.0",
+    "bcryptjs": "^2.4.3",
+    "jose": "^5.9.6",
+    "jsonwebtoken": "^9.0.2",
+    "next": "^15.0.0",
+    "postcss": "^8.4.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "tailwindcss": "^3.4.0"
+  },
+  "devDependencies": {
+    "prisma": "5.22.0"
+  }
+}
+</file>
+
+<file path="postcss.config.js">
+module.exports = {
+  plugins: {
+    tailwindcss: {},
+    autoprefixer: {},
+  },
+};
+</file>
+
+<file path="prisma/schema.prisma">
+// Prisma Schema for AI-powered Support Helpdesk
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// Ticket model - core entity of the helpdesk
+model Ticket {
+  id           String   @id @default(cuid())
+  subject      String
+  description  String   @db.Text
+
+  // AI-classified fields
+  category     String   @default("Other")      // Billing | Bug | Feature Request | HR | Other
+  assignedTeam String   @default("Support")    // Development | Billing | HR | Support
+  priority     String   @default("Medium")     // Low | Medium | High
+  draftResponse String? @db.Text              // AI-generated draft response
+
+  // Workflow
+  status       String   @default("Open")       // Open | In Progress | Resolved
+
+  // Metadata
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@map("tickets")
+}
+
+// User model for team members and admins
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  password  String                           // bcrypt hashed
+  role      String   @default("TeamMember")  // Admin | TeamMember
+  team      String?                          // Development | Billing | HR | Support (null for Admin)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("users")
+}
+</file>
+
+<file path="prisma/seed.js">
+/**
+ * Prisma Seed Script
+ * Creates initial admin and team member accounts for testing.
+ * Run: node prisma/seed.js
+ */
+
+const { PrismaClient } = require('@prisma/client');
+const bcrypt = require('bcryptjs');
+
+const prisma = new PrismaClient();
+
+async function main() {
+  console.log('🌱 Seeding database...');
+
+  // Hash a shared default password
+  const defaultPassword = await bcrypt.hash('password123', 12);
+
+  // --- Create Admin ---
+  const admin = await prisma.user.upsert({
+    where: { email: 'admin@helpdesk.com' },
+    update: {},
+    create: {
+      name: 'Admin User',
+      email: 'admin@helpdesk.com',
+      password: defaultPassword,
+      role: 'Admin',
+      team: null,
+    },
+  });
+  console.log('✅ Admin created:', admin.email);
+
+  // --- Create Team Members ---
+  const teamMembers = [
+    { name: 'Dev Team Member', email: 'dev@helpdesk.com', team: 'Development' },
+    { name: 'Billing Team Member', email: 'billing@helpdesk.com', team: 'Billing' },
+    { name: 'HR Team Member', email: 'hr@helpdesk.com', team: 'HR' },
+    { name: 'Support Team Member', email: 'support@helpdesk.com', team: 'Support' },
+  ];
+
+  for (const member of teamMembers) {
+    const user = await prisma.user.upsert({
+      where: { email: member.email },
+      update: {},
+      create: {
+        ...member,
+        password: defaultPassword,
+        role: 'TeamMember',
+      },
+    });
+    console.log(`✅ Team member created: ${user.email} (${user.team})`);
+  }
+
+  // --- Create Sample Tickets ---
+  const sampleTickets = [
+    {
+      subject: 'Cannot login to my account',
+      description: 'I have been trying to login since yesterday but keep getting an error message saying invalid credentials. I reset my password but still cannot access my account.',
+      category: 'Bug',
+      assignedTeam: 'Development',
+      priority: 'High',
+      status: 'Open',
+      draftResponse: 'Thank you for reaching out. We apologize for the inconvenience you are experiencing. Our development team will investigate the login issue and get back to you within 24 hours.',
+    },
+    {
+      subject: 'Incorrect charge on my invoice',
+      description: 'I was charged twice for my subscription this month. My invoice number is INV-2024-001. Please refund the duplicate charge.',
+      category: 'Billing',
+      assignedTeam: 'Billing',
+      priority: 'High',
+      status: 'In Progress',
+      draftResponse: 'We sincerely apologize for the billing error. Our billing team is reviewing your account and will process the refund within 3-5 business days.',
+    },
+    {
+      subject: 'Request for feature: dark mode',
+      description: 'It would be great if the application had a dark mode option. Many users prefer this for late-night use and it reduces eye strain.',
+      category: 'Feature Request',
+      assignedTeam: 'Development',
+      priority: 'Low',
+      status: 'Open',
+      draftResponse: 'Thank you for your feature suggestion! We have logged this request and our product team will consider it for a future release.',
+    },
+    {
+      subject: 'Leave request not being processed',
+      description: 'I submitted my annual leave request two weeks ago but it still shows as pending. My manager has already verbally approved it.',
+      category: 'HR',
+      assignedTeam: 'HR',
+      priority: 'Medium',
+      status: 'Open',
+      draftResponse: 'We understand your concern about your leave request. Our HR team will review the status and update it accordingly.',
+    },
+    {
+      subject: 'Application crashes on startup',
+      description: 'After the latest update, the application crashes immediately when I try to open it. I am using Windows 11 and the app version is 2.3.1.',
+      category: 'Bug',
+      assignedTeam: 'Development',
+      priority: 'High',
+      status: 'Resolved',
+      draftResponse: 'We have identified and fixed the crash issue in version 2.3.2. Please update your application to resolve this problem.',
+    },
+  ];
+
+  for (const ticket of sampleTickets) {
+    await prisma.ticket.create({ data: ticket });
+  }
+  console.log(`✅ Created ${sampleTickets.length} sample tickets`);
+
+  console.log('\n🎉 Seeding complete!');
+  console.log('\nTest Accounts:');
+  console.log('  Admin:   admin@helpdesk.com    / password123');
+  console.log('  Dev:     dev@helpdesk.com      / password123');
+  console.log('  Billing: billing@helpdesk.com  / password123');
+  console.log('  HR:      hr@helpdesk.com       / password123');
+  console.log('  Support: support@helpdesk.com  / password123');
+}
+
+main()
+  .catch((e) => {
+    console.error('❌ Seed failed:', e);
+    process.exit(1);
+  })
+  .finally(async () => {
+    await prisma.$disconnect();
+  });
+</file>
+
+<file path="README.md">
+# HelpDesk — AI-Powered Support Ticketing System
+
+A full-stack support helpdesk built with **Next.js App Router**, **Tailwind CSS**, **Prisma ORM**, and **PostgreSQL**. Tickets are automatically classified by a hybrid AI pipeline (keyword rules + Google Gemini) and routed to the correct team.
+
+---
+
+## Tech Stack
+
+| Layer      | Technology                          |
+|------------|-------------------------------------|
+| Framework  | Next.js 15 (App Router, JS only)    |
+| Styling    | Tailwind CSS 3                      |
+| ORM        | Prisma 5 + PostgreSQL               |
+| AI         | Google Gemini 1.5 Flash (via API)   |
+| Auth       | JWT (jose) + HTTP-only cookies      |
+
+> **No TypeScript** — the entire project is JavaScript (`.js` / `.jsx`).
+
+---
+
+## Features
+
+### Client Portal (`/`)
+- Clean responsive ticket submission form
+- AI auto-classifies category, team, priority, and generates a draft response
+- Shows classification result and AI draft after submission
+
+### Team Dashboard (`/dashboard`)
+- Protected — requires login
+- Team members **only see tickets assigned to their team**
+- Filter by status, category, priority
+- Update ticket status (Open → In Progress → Resolved)
+- Click any row to expand full description + AI draft response
+
+### Admin Dashboard (`/admin`)
+- Full access to **all tickets** across all teams
+- Filter by status, category, priority, team
+- Reassign tickets to a different team
+- Team breakdown cards with quick-filter
+- Statistics overview
+
+### AI Classification Pipeline
+1. **Near-duplicate check** — if a similar ticket exists, reuse its classification (Jaccard similarity ≥ 70%)
+2. **Keyword/rule classifier** — scores ticket against a multi-category keyword ruleset with confidence scoring
+3. **Gemini API fallback** — if confidence < 65%, calls `gemini-1.5-flash` with a JSON Schema structured output
+4. **Template fallback** — if Gemini is unavailable, uses a category-appropriate template response
+
+---
+
+## Setup Instructions
+
+### 1. Prerequisites
+
+- Node.js 18+
+- PostgreSQL running locally (or a hosted DB)
+
+### 2. Clone and Install
+
+```bash
+git clone <your-repo>
+cd helpdesk
+npm install
+```
+
+### 3. Configure Environment
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` and set:
+
+```env
+# Your PostgreSQL connection string
+DATABASE_URL="postgresql://USER:PASSWORD@HOST:PORT/helpdesk?schema=public"
+
+# Random secret for JWT signing (change this!)
+JWT_SECRET="your-super-secret-jwt-key"
+
+# Get a free key at https://aistudio.google.com/
+GEMINI_API_KEY="your-gemini-api-key-here"
+```
+
+> If `GEMINI_API_KEY` is not set, the app still works using the keyword classifier and template responses.
+
+### 4. Set Up the Database
+
+Create the database in PostgreSQL:
+```sql
+CREATE DATABASE helpdesk;
+```
+
+Run Prisma migrations:
+```bash
+npm run db:migrate
+# When prompted, name the migration: init
+```
+
+Generate the Prisma client:
+```bash
+npm run db:generate
+```
+
+Seed demo data (users + sample tickets):
+```bash
+npm run db:seed
+```
+
+### 5. Run the Development Server
+
+```bash
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000)
+
+---
+
+## Demo Accounts
+
+All accounts use the password: **`password123`**
+
+| Role        | Email                    | Access                          |
+|-------------|--------------------------|----------------------------------|
+| Admin       | admin@helpdesk.com       | All tickets, full admin panel    |
+| Development | dev@helpdesk.com         | Development team tickets only    |
+| Billing     | billing@helpdesk.com     | Billing team tickets only        |
+| HR          | hr@helpdesk.com          | HR team tickets only             |
+| Support     | support@helpdesk.com     | Support team tickets only        |
+
+---
+
+## Project Structure
+
+```
+helpdesk/
+├── app/
+│   ├── api/
+│   │   ├── auth/
+│   │   │   ├── login/route.js      # POST — authenticate user
+│   │   │   ├── logout/route.js     # POST — clear auth cookie
+│   │   │   └── me/route.js         # GET — current user
+│   │   └── tickets/
+│   │       ├── route.js            # GET list, POST create
+│   │       └── [id]/route.js       # GET, PATCH, DELETE single ticket
+│   ├── components/
+│   │   ├── FilterBar.jsx           # Filter dropdowns
+│   │   ├── LoadingSpinner.jsx      # SVG spinner
+│   │   ├── Navbar.jsx              # Top navigation
+│   │   ├── StatsCards.jsx          # Summary stat cards
+│   │   ├── StatusBadge.jsx         # Status/priority/category badges
+│   │   └── TicketTable.jsx         # Main ticket table (desktop + mobile)
+│   ├── admin/page.jsx              # Admin dashboard
+│   ├── dashboard/page.jsx          # Team member dashboard
+│   ├── login/page.jsx              # Login page
+│   ├── error.jsx                   # Global error boundary
+│   ├── globals.css                 # Tailwind + custom classes
+│   ├── layout.js                   # Root layout
+│   ├── not-found.jsx               # 404 page
+│   └── page.jsx                    # Client portal (ticket submission)
+├── lib/
+│   ├── auth.js                     # JWT sign/verify, cookie helpers
+│   ├── classifier.js               # AI classification pipeline
+│   └── prisma.js                   # Prisma client singleton
+├── prisma/
+│   ├── schema.prisma               # Database schema
+│   └── seed.js                     # Seed script
+├── middleware.js                   # Route protection middleware
+├── next.config.js
+├── tailwind.config.js
+├── postcss.config.js
+├── .env.example
+└── README.md
+```
+
+---
+
+## Scripts
+
+| Command              | Description                              |
+|----------------------|------------------------------------------|
+| `npm run dev`        | Start development server                 |
+| `npm run build`      | Production build                         |
+| `npm run start`      | Start production server                  |
+| `npm run db:generate`| Regenerate Prisma client                 |
+| `npm run db:migrate` | Run database migrations                  |
+| `npm run db:seed`    | Seed demo users and tickets              |
+| `npm run db:studio`  | Open Prisma Studio (DB GUI)              |
+
+---
+
+## Deployment (Vercel)
+
+1. Push to GitHub
+2. Import project in Vercel
+3. Add environment variables in Vercel dashboard:
+   - `DATABASE_URL` — your hosted PostgreSQL URL (e.g., Supabase, Neon, Railway)
+   - `JWT_SECRET` — a long random string
+   - `GEMINI_API_KEY` — your Gemini API key
+4. Deploy
+
+---
+
+## Database Schema
+
+```prisma
+model Ticket {
+  id            String   @id @default(cuid())
+  subject       String
+  description   String
+  category      String   @default("Other")
+  assignedTeam  String   @default("Support")
+  priority      String   @default("Medium")
+  draftResponse String?
+  status        String   @default("Open")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  password  String
+  role      String   @default("TeamMember")
+  team      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+```
+</file>
+
+<file path="tailwind.config.js">
+/** @type {import('tailwindcss').Config} */
+module.exports = {
+  content: [
+    './app/**/*.{js,jsx}',
+    './components/**/*.{js,jsx}',
+    './lib/**/*.{js,jsx}',
+  ],
+  theme: {
+    extend: {
+      colors: {
+        primary: {
+          50: '#eff6ff',
+          100: '#dbeafe',
+          500: '#3b82f6',
+          600: '#2563eb',
+          700: '#1d4ed8',
+          900: '#1e3a8a',
+        },
+      },
+    },
+  },
+  plugins: [],
+};
+</file>
+
+</files>
