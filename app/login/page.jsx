@@ -156,23 +156,6 @@ export default function LoginPage() {
           </form>
         </div>
 
-        {/* Demo Accounts */}
-        <div className="mt-6 card bg-gray-50 border-gray-200">
-          <p className="text-xs font-semibold text-gray-500 uppercase mb-3">Demo Accounts (password: password123)</p>
-          <div className="grid grid-cols-2 gap-2">
-            {demoAccounts.map((acc) => (
-              <button
-                key={acc.label}
-                onClick={() => { setEmail(acc.email); setPassword(acc.password); }}
-                className="text-left p-2.5 rounded-lg border border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-colors"
-              >
-                <p className="text-xs font-medium text-gray-700">{acc.label}</p>
-                <p className="text-xs text-gray-400 truncate">{acc.email}</p>
-              </button>
-            ))}
-          </div>
-        </div>
-
         <p className="text-center text-sm text-gray-500 mt-6">
           Not a team member?{' '}
           <Link href="/" className="text-blue-600 hover:text-blue-700 font-medium">
