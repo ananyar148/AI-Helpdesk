@@ -34,8 +34,18 @@ export async function middleware(request) {
       return NextResponse.redirect(new URL('/login', request.url));
     }
     if (user.role !== 'Admin') {
-      // Non-admins get redirected to their dashboard
       return NextResponse.redirect(new URL('/dashboard', request.url));
+    }
+  }
+
+  // --- Protect /settings ---
+  if (pathname.startsWith('/settings')) {
+    if (!token) {
+      return NextResponse.redirect(new URL('/login', request.url));
+    }
+    const user = await verifyToken(token);
+    if (!user) {
+      return NextResponse.redirect(new URL('/login', request.url));
     }
   }
 
@@ -43,5 +53,5 @@ export async function middleware(request) {
 }
 
 export const config = {
-  matcher: ['/dashboard/:path*', '/admin/:path*'],
+  matcher: ['/dashboard/:path*', '/admin/:path*', '/settings/:path*'],
 };

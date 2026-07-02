@@ -12,14 +12,15 @@ import { getUserFromRequest } from '../../../../lib/auth';
 // GET /api/tickets/[id]
 export async function GET(request, { params }) {
   try {
+    // Next.js 15: params is a Promise — must be awaited
+    const { id } = await params;
+
     const user = await getUserFromRequest(request);
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized.' }, { status: 401 });
     }
 
-    const ticket = await prisma.ticket.findUnique({
-      where: { id: params.id },
-    });
+    const ticket = await prisma.ticket.findUnique({ where: { id } });
 
     if (!ticket) {
       return NextResponse.json({ error: 'Ticket not found.' }, { status: 404 });
@@ -40,6 +41,9 @@ export async function GET(request, { params }) {
 // PATCH /api/tickets/[id] — update status and/or assignedTeam
 export async function PATCH(request, { params }) {
   try {
+    // Next.js 15: params is a Promise — must be awaited
+    const { id } = await params;
+
     const user = await getUserFromRequest(request);
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized.' }, { status: 401 });
@@ -48,9 +52,7 @@ export async function PATCH(request, { params }) {
     const body = await request.json();
     const { status, assignedTeam } = body;
 
-    const ticket = await prisma.ticket.findUnique({
-      where: { id: params.id },
-    });
+    const ticket = await prisma.ticket.findUnique({ where: { id } });
 
     if (!ticket) {
       return NextResponse.json({ error: 'Ticket not found.' }, { status: 404 });
@@ -92,7 +94,7 @@ export async function PATCH(request, { params }) {
     if (assignedTeam) updateData.assignedTeam = assignedTeam;
 
     const updated = await prisma.ticket.update({
-      where: { id: params.id },
+      where: { id },
       data: updateData,
     });
 
@@ -106,6 +108,9 @@ export async function PATCH(request, { params }) {
 // DELETE /api/tickets/[id] — admin only
 export async function DELETE(request, { params }) {
   try {
+    // Next.js 15: params is a Promise — must be awaited
+    const { id } = await params;
+
     const user = await getUserFromRequest(request);
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized.' }, { status: 401 });
@@ -115,7 +120,7 @@ export async function DELETE(request, { params }) {
       return NextResponse.json({ error: 'Admin access required.' }, { status: 403 });
     }
 
-    await prisma.ticket.delete({ where: { id: params.id } });
+    await prisma.ticket.delete({ where: { id } });
 
     return NextResponse.json({ success: true, message: 'Ticket deleted.' });
   } catch (err) {
