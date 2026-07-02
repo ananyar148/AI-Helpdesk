@@ -1,0 +1,111 @@
+'use client';
+
+/**
+ * ActivityTimeline — chronological log of all actions on a ticket.
+ */
+
+const ACTION_CONFIG = {
+  created:            { icon: '🎫', label: 'Ticket Created',      color: 'bg-blue-100 text-blue-700' },
+  status_updated:     { icon: '🔄', label: 'Status Updated',      color: 'bg-yellow-100 text-yellow-700' },
+  priority_changed:   { icon: '⚡', label: 'Priority Changed',    color: 'bg-orange-100 text-orange-700' },
+  team_reassigned:    { icon: '👥', label: 'Team Reassigned',     color: 'bg-purple-100 text-purple-700' },
+  ai_draft_generated: { icon: '🤖', label: 'AI Draft Generated',  color: 'bg-indigo-100 text-indigo-700' },
+  ticket_updated:     { icon: '✏️', label: 'Ticket Updated',      color: 'bg-gray-100 text-gray-700' },
+  ticket_deleted:     { icon: '🗑️', label: 'Ticket Deleted',      color: 'bg-red-100 text-red-700' },
+};
+
+function formatTime(dateStr) {
+  const d = new Date(dateStr);
+  return d.toLocaleString('en-US', {
+    month: 'short', day: 'numeric', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  });
+}
+
+export default function ActivityTimeline({ activities = [] }) {
+  if (activities.length === 0) {
+    return (
+      <div className="text-center py-8 text-gray-400 text-sm">
+        No activity recorded yet.
+      </div>
+    );
+  }
+
+  return (
+    <div className="flow-root">
+      <ul className="-mb-8">
+        {activities.map((activity, idx) => {
+          const cfg = ACTION_CONFIG[activity.action] || {
+            icon: '📝', label: activity.action, color: 'bg-gray-100 text-gray-700',
+          };
+          const isLast = idx === activities.length - 1;
+
+          return (
+            <li key={activity.id}>
+              <div className="relative pb-8">
+                {/* Connector line */}
+                {!isLast && (
+                  <span
+                    className="absolute left-4 top-4 -ml-px h-full w-0.5 bg-gray-200"
+                    aria-hidden="true"
+                  />
+                )}
+
+                <div className="relative flex items-start gap-3">
+                  {/* Icon bubble */}
+                  <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-sm ${cfg.color}`}>
+                    {cfg.icon}
+                  </div>
+
+                  {/* Content */}
+                  <div className="min-w-0 flex-1 pt-1">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <span className="text-sm font-medium text-gray-800">{cfg.label}</span>
+                      <time className="text-xs text-gray-400 flex-shrink-0">
+                        {formatTime(activity.createdAt)}
+                      </time>
+                    </div>
+
+                    {activity.detail && (
+                      <p className="text-xs text-gray-600 mt-0.5">{activity.detail}</p>
+                    )}
+
+                    {/* Before / After */}
+                    {(activity.oldValue || activity.newValue) && (
+                      <div className="flex items-center gap-2 mt-1 text-xs">
+                        {activity.oldValue && (
+                          <span className="px-1.5 py-0.5 rounded bg-red-50 text-red-600 line-through">
+                            {activity.oldValue}
+                          </span>
+                        )}
+                        {activity.oldValue && activity.newValue && (
+                          <span className="text-gray-400">→</span>
+                        )}
+                        {activity.newValue && (
+                          <span className="px-1.5 py-0.5 rounded bg-green-50 text-green-700 font-medium">
+                            {activity.newValue}
+                          </span>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Actor */}
+                    {activity.userName && (
+                      <p className="text-xs text-gray-400 mt-0.5">
+                        by <span className="font-medium text-gray-600">{activity.userName}</span>
+                        {activity.userRole && ` (${activity.userRole})`}
+                      </p>
+                    )}
+                    {!activity.userName && (
+                      <p className="text-xs text-gray-400 mt-0.5">by System / AI</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}

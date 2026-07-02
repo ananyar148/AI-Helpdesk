@@ -165,8 +165,13 @@ export default function DashboardPage() {
               <TicketTable
                 tickets={filteredTickets}
                 isAdmin={false}
+                userRole={user.role}
+                userTeam={user.team}
                 hasActiveFilters={!!(filters.status || filters.category || filters.priority)}
                 onClearFilters={() => setFilters({ status: '', category: '', priority: '', team: '' })}
+                onTicketDeleted={(deletedId) => {
+                  setTickets((prev) => prev.filter((t) => t.id !== deletedId));
+                }}
               />
             </div>
           </>

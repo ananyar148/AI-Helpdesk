@@ -200,8 +200,13 @@ export default function AdminPage() {
               <TicketTable
                 tickets={filteredTickets}
                 isAdmin={true}
+                userRole={user.role}
+                userTeam={user.team}
                 hasActiveFilters={!!(filters.status || filters.category || filters.priority || filters.team)}
                 onClearFilters={() => setFilters({ status: '', category: '', priority: '', team: '' })}
+                onTicketDeleted={(deletedId) => {
+                  setTickets((prev) => prev.filter((t) => t.id !== deletedId));
+                }}
               />
             </div>
           </>

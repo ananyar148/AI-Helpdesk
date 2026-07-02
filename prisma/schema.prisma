@@ -12,24 +12,54 @@ datasource db {
 
 // Ticket model - core entity of the helpdesk
 model Ticket {
-  id           String   @id @default(cuid())
-  subject      String
-  description  String   @db.Text
+  id            String           @id @default(cuid())
+  subject       String
+  description   String           @db.Text
 
   // AI-classified fields
-  category     String   @default("Other")      // Billing | Bug | Feature Request | HR | Other
-  assignedTeam String   @default("Support")    // Development | Billing | HR | Support
-  priority     String   @default("Medium")     // Low | Medium | High
-  draftResponse String? @db.Text              // AI-generated draft response
+  category      String           @default("Other")    // Billing | Bug | Feature Request | HR | Other
+  assignedTeam  String           @default("Support")  // Development | Billing | HR | Support
+  priority      String           @default("Medium")   // Low | Medium | High
+  draftResponse String?          @db.Text             // AI-generated draft response
 
   // Workflow
-  status       String   @default("Open")       // Open | In Progress | Resolved
+  status        String           @default("Open")     // Open | In Progress | Resolved
+
+  // Activity log
+  activities    TicketActivity[]
 
   // Metadata
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
 
   @@map("tickets")
+}
+
+// Activity log — every action on a ticket is recorded here
+model TicketActivity {
+  id         String   @id @default(cuid())
+  ticketId   String
+  ticket     Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  // Who did it (null = system/AI or anonymous client submission)
+  userId     String?
+  userName   String?  // denormalized so logs survive user deletion
+  userRole   String?  // Admin | TeamMember | System
+
+  // What happened
+  action     String   // created | status_updated | priority_changed |
+                      // team_reassigned | ai_draft_generated | ticket_updated | ticket_deleted
+
+  // Human-readable description, e.g. "Status changed from Open to Resolved"
+  detail     String?  @db.Text
+
+  // Snapshot of before/after for auditing
+  oldValue   String?
+  newValue   String?
+
+  createdAt  DateTime @default(now())
+
+  @@map("ticket_activities")
 }
 
 // User model for team members and admins
