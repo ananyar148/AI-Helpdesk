@@ -34,8 +34,9 @@ export default function Navbar() {
   const navLinks = user
     ? user.role === 'Admin'
       ? [
-          { href: '/admin',     label: 'Admin Dashboard' },
-          { href: '/',          label: 'Client Portal' },
+          { href: '/admin',       label: 'Admin Dashboard' },
+          { href: '/admin/users', label: 'Users' },
+          { href: '/',            label: 'Client Portal' },
         ]
       : [
           // TeamMembers: only their dashboard — no Client Portal link

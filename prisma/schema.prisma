@@ -1,4 +1,4 @@
-// Prisma Schema for AI-powered Support Helpdesk
+// Prisma Schema — AI-powered Support Helpdesk
 
 generator client {
   provider = "prisma-client-js"
@@ -10,7 +10,7 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
-// Ticket model - core entity of the helpdesk
+// ─── Ticket ──────────────────────────────────────────────────────────────────
 model Ticket {
   id            String           @id @default(cuid())
   subject       String
@@ -20,40 +20,64 @@ model Ticket {
   category      String           @default("Other")    // Billing | Bug | Feature Request | HR | Other
   assignedTeam  String           @default("Support")  // Development | Billing | HR | Support
   priority      String           @default("Medium")   // Low | Medium | High
-  draftResponse String?          @db.Text             // AI-generated draft response
+  draftResponse String?          @db.Text
 
   // Workflow
   status        String           @default("Open")     // Open | In Progress | Resolved
 
-  // Activity log
-  activities    TicketActivity[]
+  // Duplicate detection
+  isDuplicate      Boolean  @default(false)
+  duplicateOfId    String?                            // ID of the original ticket
+  similarityScore  Float?                             // 0–1 Jaccard similarity
 
-  // Metadata
+  // Relations
+  activities    TicketActivity[]
+  workLogs      TicketWorkLog[]
+
   createdAt     DateTime         @default(now())
   updatedAt     DateTime         @updatedAt
 
   @@map("tickets")
 }
 
-// Activity log — every action on a ticket is recorded here
+// ─── Work Log ─────────────────────────────────────────────────────────────────
+// Internal team notes: investigation, fixes, QA, resolution notes, etc.
+// visibility = "Internal" → only team members/admins can see
+// visibility = "Client"   → shown to clients as final resolution
+model TicketWorkLog {
+  id         String   @id @default(cuid())
+  ticketId   String
+  ticket     Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  userId     String?
+  userName   String                            // denormalized
+  userRole   String                            // Admin | TeamMember
+  team       String?                           // which team added the log
+
+  note       String   @db.Text
+  visibility String   @default("Internal")    // Internal | Client
+
+  createdAt  DateTime @default(now())
+
+  @@map("ticket_work_logs")
+}
+
+// ─── Activity Log ─────────────────────────────────────────────────────────────
 model TicketActivity {
   id         String   @id @default(cuid())
   ticketId   String
   ticket     Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
 
-  // Who did it (null = system/AI or anonymous client submission)
   userId     String?
-  userName   String?  // denormalized so logs survive user deletion
-  userRole   String?  // Admin | TeamMember | System
+  userName   String?                           // e.g. "Ram"
+  userRole   String?                           // Admin | TeamMember
+  userTeam   String?                           // e.g. "Development" — for audit display
 
-  // What happened
   action     String   // created | status_updated | priority_changed |
-                      // team_reassigned | ai_draft_generated | ticket_updated | ticket_deleted
+                      // team_reassigned | ai_draft_generated | work_log_added |
+                      // ticket_updated | ticket_deleted | duplicate_detected
 
-  // Human-readable description, e.g. "Status changed from Open to Resolved"
   detail     String?  @db.Text
-
-  // Snapshot of before/after for auditing
   oldValue   String?
   newValue   String?
 
@@ -62,14 +86,14 @@ model TicketActivity {
   @@map("ticket_activities")
 }
 
-// User model for team members and admins
+// ─── User ─────────────────────────────────────────────────────────────────────
 model User {
   id        String   @id @default(cuid())
   name      String
   email     String   @unique
-  password  String                           // bcrypt hashed
-  role      String   @default("TeamMember")  // Admin | TeamMember
-  team      String?                          // Development | Billing | HR | Support (null for Admin)
+  password  String
+  role      String   @default("TeamMember")   // Admin | TeamMember
+  team      String?                            // Development | Billing | HR | Support
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

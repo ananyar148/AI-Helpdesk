@@ -2,7 +2,8 @@
 
 /**
  * Login Page — /login
- * Authenticates team members and admins.
+ * Authenticates individual team members and admins by email + password.
+ * Name, role, and team are fetched from the database after successful login.
  */
 
 import { useState } from 'react';
@@ -33,7 +34,7 @@ export default function LoginPage() {
       const data = await res.json();
 
       if (!res.ok) {
-        setError(data.error || 'Login failed. Please try again.');
+        setError(data.error || 'Invalid email or password.');
         return;
       }
 
@@ -49,14 +50,6 @@ export default function LoginPage() {
       setLoading(false);
     }
   };
-
-  // Quick-fill demo accounts
-  const demoAccounts = [
-    { label: 'Admin', email: 'admin@helpdesk.com', password: 'password123' },
-    { label: 'Dev Team', email: 'dev@helpdesk.com', password: 'password123' },
-    { label: 'Billing', email: 'billing@helpdesk.com', password: 'password123' },
-    { label: 'HR', email: 'hr@helpdesk.com', password: 'password123' },
-  ];
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50 flex items-center justify-center px-4 py-12">

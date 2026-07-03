@@ -1,6 +1,7 @@
 /**
  * Prisma Seed Script
- * Creates initial admin and team member accounts for testing.
+ * Creates individual user accounts — each person has their own name, email, and password.
+ * Multiple users can belong to the same team.
  * Run: node prisma/seed.js
  */
 
@@ -12,10 +13,9 @@ const prisma = new PrismaClient();
 async function main() {
   console.log('🌱 Seeding database...');
 
-  // Hash a shared default password
   const defaultPassword = await bcrypt.hash('password123', 12);
 
-  // --- Create Admin ---
+  // --- Admin ---
   const admin = await prisma.user.upsert({
     where: { email: 'admin@helpdesk.com' },
     update: {},
@@ -29,12 +29,20 @@ async function main() {
   });
   console.log('✅ Admin created:', admin.email);
 
-  // --- Create Team Members ---
+  // --- Individual team members (multiple per team) ---
   const teamMembers = [
-    { name: 'Dev Team Member', email: 'dev@helpdesk.com', team: 'Development' },
-    { name: 'Billing Team Member', email: 'billing@helpdesk.com', team: 'Billing' },
-    { name: 'HR Team Member', email: 'hr@helpdesk.com', team: 'HR' },
-    { name: 'Support Team Member', email: 'support@helpdesk.com', team: 'Support' },
+    // Development — 2 members
+    { name: 'Ananya Rajan',    email: 'ananya@helpdesk.com',   team: 'Development' },
+    { name: 'Vikram Nair',     email: 'vikram@helpdesk.com',   team: 'Development' },
+    // Billing — 2 members
+    { name: 'Priya Mehta',     email: 'priya@helpdesk.com',    team: 'Billing' },
+    { name: 'Rohan Sharma',    email: 'rohan@helpdesk.com',    team: 'Billing' },
+    // HR — 2 members
+    { name: 'Divya Krishnan',  email: 'divya@helpdesk.com',    team: 'HR' },
+    { name: 'Arjun Pillai',    email: 'arjun@helpdesk.com',    team: 'HR' },
+    // Support — 2 members
+    { name: 'Sneha Patel',     email: 'sneha@helpdesk.com',    team: 'Support' },
+    { name: 'Rahul Gupta',     email: 'rahul@helpdesk.com',    team: 'Support' },
   ];
 
   for (const member of teamMembers) {
@@ -47,10 +55,10 @@ async function main() {
         role: 'TeamMember',
       },
     });
-    console.log(`✅ Team member created: ${user.email} (${user.team})`);
+    console.log(`✅ ${user.name} (${user.team}) created: ${user.email}`);
   }
 
-  // --- Create Sample Tickets ---
+  // --- Sample Tickets ---
   const sampleTickets = [
     {
       subject: 'Cannot login to my account',
@@ -105,12 +113,17 @@ async function main() {
   console.log(`✅ Created ${sampleTickets.length} sample tickets`);
 
   console.log('\n🎉 Seeding complete!');
-  console.log('\nTest Accounts:');
-  console.log('  Admin:   admin@helpdesk.com    / password123');
-  console.log('  Dev:     dev@helpdesk.com      / password123');
-  console.log('  Billing: billing@helpdesk.com  / password123');
-  console.log('  HR:      hr@helpdesk.com       / password123');
-  console.log('  Support: support@helpdesk.com  / password123');
+  console.log('\nTest Accounts (all use password: password123)');
+  console.log('─────────────────────────────────────────────────');
+  console.log('  Admin:      admin@helpdesk.com');
+  console.log('  Dev:        ananya@helpdesk.com  (Ananya Rajan)');
+  console.log('  Dev:        vikram@helpdesk.com  (Vikram Nair)');
+  console.log('  Billing:    priya@helpdesk.com   (Priya Mehta)');
+  console.log('  Billing:    rohan@helpdesk.com   (Rohan Sharma)');
+  console.log('  HR:         divya@helpdesk.com   (Divya Krishnan)');
+  console.log('  HR:         arjun@helpdesk.com   (Arjun Pillai)');
+  console.log('  Support:    sneha@helpdesk.com   (Sneha Patel)');
+  console.log('  Support:    rahul@helpdesk.com   (Rahul Gupta)');
 }
 
 main()
