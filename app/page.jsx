@@ -29,6 +29,7 @@ const PHASE = {
 export default function ClientPortal() {
   const [subject,     setSubject]     = useState('');
   const [description, setDescription] = useState('');
+  const [clientEmail, setClientEmail] = useState('');
   const [phase,       setPhase]       = useState(PHASE.IDLE);
   const [message,     setMessage]     = useState('');
   const [ticket,      setTicket]      = useState(null);
@@ -86,6 +87,7 @@ export default function ClientPortal() {
         body:    JSON.stringify({
           subject:          subject.trim(),
           description:      description.trim(),
+          clientEmail:      clientEmail.trim() || null,
           forceCreate,
           duplicateOfId,
           similarityScore,
@@ -109,6 +111,7 @@ export default function ClientPortal() {
       setMessage(data.message);
       setSubject('');
       setDescription('');
+      setClientEmail('');
       setDupInfo(null);
       setPreClassification(null);
     } catch (err) {
@@ -143,6 +146,16 @@ export default function ClientPortal() {
               <div className="flex-1">
                 <h3 className="font-semibold text-green-900 mb-1">Ticket Submitted!</h3>
                 <p className="text-sm text-green-700 mb-4">{message}</p>
+
+                {ticket.clientEmail && (
+                  <div className="mb-4 flex items-center gap-2 text-sm text-green-800 bg-green-100 rounded-lg px-3 py-2">
+                    <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                        d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+                    </svg>
+                    Confirmation sent to <strong>{ticket.clientEmail}</strong>
+                  </div>
+                )}
 
                 {ticket.isDuplicate && (
                   <div className="alert-info mb-4 text-xs flex items-center gap-2">
@@ -290,6 +303,25 @@ export default function ClientPortal() {
             )}
 
             <form onSubmit={handleSubmit} noValidate>
+              <div className="mb-5">
+                <label htmlFor="clientEmail" className="input-label">
+                  Your Email Address <span className="text-gray-400 text-xs font-normal">(optional — for status updates)</span>
+                </label>
+                <input
+                  id="clientEmail"
+                  type="email"
+                  value={clientEmail}
+                  onChange={(e) => setClientEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  className="input-field"
+                  disabled={isLoading}
+                  autoComplete="email"
+                />
+                <p className="text-xs text-gray-400 mt-1">
+                  We'll email you when your ticket is received and when it's resolved.
+                </p>
+              </div>
+
               <div className="mb-5">
                 <label htmlFor="subject" className="input-label">
                   Subject <span className="text-red-500">*</span>

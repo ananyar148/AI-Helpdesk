@@ -9,6 +9,11 @@ import { NextResponse } from 'next/server';
 import prisma from '../../../../lib/prisma';
 import { getUserFromRequest } from '../../../../lib/auth';
 import { logActivity, buildDetail, ACTIONS } from '../../../../lib/activity';
+import {
+  sendTicketResolvedClient,
+  sendTicketResolvedAdmin,
+  sendChangeNotificationActor,
+} from '../../../../lib/mailer';
 
 const VALID_TEAMS      = ['Development', 'Billing', 'HR', 'Support'];
 const VALID_STATUSES   = ['Open', 'In Progress', 'Resolved'];
@@ -128,6 +133,38 @@ export async function PATCH(request, { params }) {
         newValue: priority,
         actor:    user,
       });
+    }
+
+    // ── Email notifications ───────────────────────────────────────────────────
+    // Build a list of what changed for the actor confirmation email
+    const changes = [];
+    if (status && status !== ticket.status) {
+      changes.push({ label: 'Status', from: ticket.status, to: status });
+    }
+    if (priority && priority !== ticket.priority) {
+      changes.push({ label: 'Priority', from: ticket.priority, to: priority });
+    }
+    if (assignedTeams) {
+      const added   = assignedTeams.filter((t) => !ticket.assignedTeams.includes(t));
+      const removed = ticket.assignedTeams.filter((t) => !assignedTeams.includes(t));
+      if (added.length || removed.length) {
+        changes.push({
+          label: 'Teams',
+          from:  ticket.assignedTeams.join(', '),
+          to:    assignedTeams.join(', '),
+        });
+      }
+    }
+
+    if (changes.length > 0) {
+      // Always notify the actor about what they changed
+      sendChangeNotificationActor(updated, user, changes);
+
+      // If ticket just became Resolved — notify client + admin
+      if (status === 'Resolved' && ticket.status !== 'Resolved') {
+        sendTicketResolvedClient(updated);
+        sendTicketResolvedAdmin(updated, user);
+      }
     }
 
     return NextResponse.json({ success: true, ticket: updated });

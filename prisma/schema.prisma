@@ -30,6 +30,9 @@ model Ticket {
   duplicateOfId    String?
   similarityScore  Float?
 
+  // Client contact — stored at submission for resolution emails
+  clientEmail      String?
+
   // Relations
   activities    TicketActivity[]
   workLogs      TicketWorkLog[]

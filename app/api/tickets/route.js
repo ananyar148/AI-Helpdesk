@@ -10,6 +10,10 @@ import { classifyTicket } from '../../../lib/classifier';
 import { getUserFromRequest } from '../../../lib/auth';
 import { logActivity, buildDetail, ACTIONS } from '../../../lib/activity';
 import { findBestMatch } from '../../../lib/duplicate';
+import {
+  sendTicketCreatedClient,
+  sendTicketCreatedAdmin,
+} from '../../../lib/mailer';
 
 // POST /api/tickets — public ticket submission
 export async function POST(request) {
@@ -18,6 +22,7 @@ export async function POST(request) {
     const {
       subject,
       description,
+      clientEmail        = null,
       forceCreate        = false,
       duplicateOfId      = null,
       similarityScore    = null,
@@ -40,6 +45,13 @@ export async function POST(request) {
     if (description.trim().length < 10) {
       return NextResponse.json(
         { error: 'Description must be at least 10 characters.' },
+        { status: 400 }
+      );
+    }
+    // Validate email format if provided
+    if (clientEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clientEmail.trim())) {
+      return NextResponse.json(
+        { error: 'Please enter a valid email address.' },
         { status: 400 }
       );
     }
@@ -102,6 +114,7 @@ export async function POST(request) {
       data: {
         subject:         subject.trim(),
         description:     description.trim(),
+        clientEmail:     clientEmail ? clientEmail.trim().toLowerCase() : null,
         category:        classification.category,
         assignedTeams,
         priority:        classification.priority,
@@ -135,6 +148,11 @@ export async function POST(request) {
         newValue: ticket.duplicateOfId,
       });
     }
+
+    // ── Send emails (non-blocking — failures won't break the response) ────────
+    const emailClient = clientEmail?.trim().toLowerCase() || null;
+    sendTicketCreatedClient(ticket, emailClient);
+    sendTicketCreatedAdmin(ticket, emailClient);
 
     return NextResponse.json(
       {

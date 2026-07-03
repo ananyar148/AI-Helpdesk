@@ -17,11 +17,11 @@ async function main() {
 
   // --- Admin ---
   const admin = await prisma.user.upsert({
-    where: { email: 'admin@helpdesk.com' },
+    where: { email: 'ananyar@steorasystems.com' },
     update: {},
     create: {
       name: 'Admin User',
-      email: 'admin@helpdesk.com',
+      email: 'ananyar@steorasystems.com',
       password: defaultPassword,
       role: 'Admin',
       team: null,
@@ -124,7 +124,7 @@ async function main() {
   console.log('\n🎉 Seeding complete!');
   console.log('\nTest Accounts (all use password: password123)');
   console.log('─────────────────────────────────────────────────');
-  console.log('  Admin:      admin@helpdesk.com');
+  console.log('  Admin:      ananyar@steorasystems.com');
   console.log('  Dev:        ananya@helpdesk.com  (Ananya Rajan)');
   console.log('  Dev:        vikram@helpdesk.com  (Vikram Nair)');
   console.log('  Billing:    priya@helpdesk.com   (Priya Mehta)');
