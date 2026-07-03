@@ -2,50 +2,129 @@
 
 /**
  * TicketTable component
- * - Rows link to /tickets/[id] (detail + activity page)
+ * - Rows link to /tickets/[id]
  * - Status dropdown: TeamMember (own team) + Admin
- * - Reassign dropdown: Admin only
- * - Delete button: TeamMember (own team) + Admin, with confirmation dialog
- * - Optimistic overrides for status/team changes
+ * - Multi-team reassign popover: Admin only
+ * - Delete button with confirmation dialog
  */
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { StatusBadge, PriorityBadge, CategoryBadge, TeamBadge } from './StatusBadge';
+import { StatusBadge, PriorityBadge, CategoryBadge, TeamsDisplay } from './StatusBadge';
 import LoadingSpinner from './LoadingSpinner';
 
 const STATUS_OPTIONS = ['Open', 'In Progress', 'Resolved'];
 const TEAM_OPTIONS   = ['Development', 'Billing', 'HR', 'Support'];
 
+// ── Inline multi-team picker used in the Reassign column ──────────────────────
+function TeamPicker({ currentTeams, ticketId, onSaved }) {
+  const [selected,  setSelected]  = useState(currentTeams || []);
+  const [saving,    setSaving]    = useState(false);
+  const [open,      setOpen]      = useState(false);
+  const [error,     setError]     = useState('');
+
+  const toggle = (team) =>
+    setSelected((prev) =>
+      prev.includes(team) ? prev.filter((t) => t !== team) : [...prev, team]
+    );
+
+  const save = async () => {
+    if (selected.length === 0) { setError('Select at least one team.'); return; }
+    setSaving(true);
+    setError('');
+    try {
+      const res  = await fetch(`/api/tickets/${ticketId}`, {
+        method:  'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ assignedTeams: selected }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed');
+      onSaved(data.ticket.assignedTeams);
+      setOpen(false);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="relative">
+      <button
+        onClick={(e) => { e.stopPropagation(); setOpen(!open); setSelected(currentTeams || []); }}
+        className="text-xs border border-gray-200 rounded-md px-2 py-1 bg-white hover:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400 whitespace-nowrap"
+      >
+        {currentTeams?.length ? currentTeams.join(', ') : 'Unassigned'} ▾
+      </button>
+
+      {open && (
+        <div
+          className="absolute z-30 left-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-lg p-3 min-w-[180px]"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <p className="text-xs font-semibold text-gray-600 mb-2">Assign teams</p>
+          {TEAM_OPTIONS.map((t) => (
+            <label key={t} className="flex items-center gap-2 py-1 cursor-pointer hover:text-blue-700">
+              <input
+                type="checkbox"
+                checked={selected.includes(t)}
+                onChange={() => toggle(t)}
+                className="accent-blue-600"
+              />
+              <span className="text-xs">{t}</span>
+            </label>
+          ))}
+          {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
+          <div className="flex gap-2 mt-3">
+            <button
+              onClick={save}
+              disabled={saving}
+              className="btn-primary text-xs px-2 py-1"
+            >
+              {saving ? <LoadingSpinner size="sm" /> : 'Save'}
+            </button>
+            <button
+              onClick={() => setOpen(false)}
+              className="btn-secondary text-xs px-2 py-1"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Main TicketTable ───────────────────────────────────────────────────────────
 export default function TicketTable({
   tickets,
-  isAdmin        = false,
-  userTeam       = null,   // current user's team (null for Admin)
-  userRole       = null,   // 'Admin' | 'TeamMember'
-  onTicketDeleted,         // callback(ticketId) so parent can remove from list
+  isAdmin          = false,
+  userTeam         = null,
+  userRole         = null,
+  onTicketDeleted,
   onClearFilters,
   hasActiveFilters = false,
 }) {
-  const [overrides,  setOverrides]  = useState({});
-  const [updating,   setUpdating]   = useState(null);
-  const [error,      setError]      = useState('');
-
-  // Delete confirmation state
-  const [confirmDelete, setConfirmDelete] = useState(null); // ticket object
+  const [overrides,     setOverrides]     = useState({});
+  const [updatingId,    setUpdatingId]    = useState(null);
+  const [error,         setError]         = useState('');
+  const [confirmDelete, setConfirmDelete] = useState(null);
   const [deleting,      setDeleting]      = useState(false);
 
   const merge = (ticket) => ({ ...ticket, ...(overrides[ticket.id] || {}) });
 
-  // Can this user delete this ticket?
   const canDelete = (ticket) => {
     if (userRole === 'Admin') return true;
-    if (userRole === 'TeamMember' && userTeam && ticket.assignedTeam === userTeam) return true;
+    const teams = ticket.assignedTeams ?? (ticket.assignedTeam ? [ticket.assignedTeam] : []);
+    if (userRole === 'TeamMember' && userTeam && teams.includes(userTeam)) return true;
     return false;
   };
 
   const handleStatusChange = async (ticketId, newStatus, e) => {
     e.stopPropagation();
-    setUpdating(ticketId);
+    setUpdatingId(ticketId);
     setError('');
     try {
       const res  = await fetch(`/api/tickets/${ticketId}`, {
@@ -59,28 +138,12 @@ export default function TicketTable({
     } catch (err) {
       setError(err.message);
     } finally {
-      setUpdating(null);
+      setUpdatingId(null);
     }
   };
 
-  const handleTeamChange = async (ticketId, newTeam, e) => {
-    e.stopPropagation();
-    setUpdating(ticketId);
-    setError('');
-    try {
-      const res  = await fetch(`/api/tickets/${ticketId}`, {
-        method:  'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ assignedTeam: newTeam }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to reassign');
-      setOverrides((prev) => ({ ...prev, [ticketId]: { ...prev[ticketId], assignedTeam: newTeam } }));
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setUpdating(null);
-    }
+  const handleTeamsSaved = (ticketId, newTeams) => {
+    setOverrides((prev) => ({ ...prev, [ticketId]: { ...prev[ticketId], assignedTeams: newTeams } }));
   };
 
   const handleDeleteConfirmed = async () => {
@@ -105,7 +168,6 @@ export default function TicketTable({
       month: 'short', day: 'numeric', year: 'numeric',
     });
 
-  // ── Empty state ────────────────────────────────────────────────────────
   if (!tickets || tickets.length === 0) {
     return (
       <div className="text-center py-16 text-gray-500">
@@ -131,9 +193,6 @@ export default function TicketTable({
     );
   }
 
-  // Number of columns for colspan calculation
-  const colCount = isAdmin ? 8 : 7; // +1 for Reassign, +1 for Delete always
-
   return (
     <>
       {error && (
@@ -145,14 +204,14 @@ export default function TicketTable({
         </div>
       )}
 
-      {/* ── Desktop Table ──────────────────────────────────────────────── */}
+      {/* ── Desktop Table ──────────────────────────────────────────────────── */}
       <div className="hidden md:block overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-gray-200 text-left">
               <th className="pb-3 pr-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Subject</th>
               <th className="pb-3 pr-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Category</th>
-              <th className="pb-3 pr-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Team</th>
+              <th className="pb-3 pr-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Teams</th>
               <th className="pb-3 pr-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Priority</th>
               <th className="pb-3 pr-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
               {isAdmin && (
@@ -164,12 +223,13 @@ export default function TicketTable({
           </thead>
           <tbody className="divide-y divide-gray-100">
             {tickets.map((rawTicket) => {
-              const ticket   = merge(rawTicket);
-              const showDel  = canDelete(ticket);
+              const ticket  = merge(rawTicket);
+              const teams   = ticket.assignedTeams ?? (ticket.assignedTeam ? [ticket.assignedTeam] : []);
+              const showDel = canDelete(ticket);
 
               return (
                 <tr key={ticket.id} className="hover:bg-gray-50 transition-colors group">
-                  {/* Subject — links to detail page */}
+                  {/* Subject */}
                   <td className="py-3 pr-4">
                     <Link href={`/tickets/${ticket.id}`} className="block group-hover:text-blue-600">
                       <div className="font-medium text-gray-900 truncate max-w-[200px] group-hover:text-blue-600" title={ticket.subject}>
@@ -182,12 +242,12 @@ export default function TicketTable({
                   </td>
 
                   <td className="py-3 pr-4"><CategoryBadge category={ticket.category} /></td>
-                  <td className="py-3 pr-4"><TeamBadge     team={ticket.assignedTeam} /></td>
+                  <td className="py-3 pr-4"><TeamsDisplay assignedTeams={teams} /></td>
                   <td className="py-3 pr-4"><PriorityBadge priority={ticket.priority} /></td>
 
                   {/* Status dropdown */}
                   <td className="py-3 pr-4">
-                    {updating === ticket.id ? <LoadingSpinner size="sm" /> : (
+                    {updatingId === ticket.id ? <LoadingSpinner size="sm" /> : (
                       <select
                         value={ticket.status}
                         onChange={(e) => handleStatusChange(ticket.id, e.target.value, e)}
@@ -199,19 +259,14 @@ export default function TicketTable({
                     )}
                   </td>
 
-                  {/* Reassign (admin only) */}
+                  {/* Multi-team reassign — Admin only */}
                   {isAdmin && (
                     <td className="py-3 pr-4">
-                      {updating === ticket.id ? <LoadingSpinner size="sm" /> : (
-                        <select
-                          value={ticket.assignedTeam}
-                          onChange={(e) => handleTeamChange(ticket.id, e.target.value, e)}
-                          className="text-xs border border-gray-200 rounded-md px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400 cursor-pointer"
-                          aria-label={`Reassign ${ticket.subject}`}
-                        >
-                          {TEAM_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
-                        </select>
-                      )}
+                      <TeamPicker
+                        currentTeams={teams}
+                        ticketId={ticket.id}
+                        onSaved={(newTeams) => handleTeamsSaved(ticket.id, newTeams)}
+                      />
                     </td>
                   )}
 
@@ -253,10 +308,11 @@ export default function TicketTable({
         </table>
       </div>
 
-      {/* ── Mobile Cards ──────────────────────────────────────────────────── */}
+      {/* ── Mobile Cards ──────────────────────────────────────────────────────── */}
       <div className="md:hidden space-y-4">
         {tickets.map((rawTicket) => {
           const ticket  = merge(rawTicket);
+          const teams   = ticket.assignedTeams ?? (ticket.assignedTeam ? [ticket.assignedTeam] : []);
           const showDel = canDelete(ticket);
           return (
             <div key={ticket.id} className="border border-gray-200 rounded-lg p-4 bg-white">
@@ -268,27 +324,24 @@ export default function TicketTable({
               <p className="text-xs text-gray-500 mb-3 line-clamp-2">{ticket.description}</p>
               <div className="flex flex-wrap gap-1.5 mb-3">
                 <CategoryBadge category={ticket.category} />
-                <TeamBadge     team={ticket.assignedTeam} />
+                <TeamsDisplay assignedTeams={teams} />
                 <PriorityBadge priority={ticket.priority} />
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <select
                   value={ticket.status}
                   onChange={(e) => handleStatusChange(ticket.id, e.target.value, e)}
                   className="text-xs border border-gray-200 rounded-md px-2 py-1 bg-white flex-1"
-                  disabled={updating === ticket.id}
+                  disabled={updatingId === ticket.id}
                 >
                   {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
                 </select>
                 {isAdmin && (
-                  <select
-                    value={ticket.assignedTeam}
-                    onChange={(e) => handleTeamChange(ticket.id, e.target.value, e)}
-                    className="text-xs border border-gray-200 rounded-md px-2 py-1 bg-white flex-1"
-                    disabled={updating === ticket.id}
-                  >
-                    {TEAM_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
-                  </select>
+                  <TeamPicker
+                    currentTeams={teams}
+                    ticketId={ticket.id}
+                    onSaved={(newTeams) => handleTeamsSaved(ticket.id, newTeams)}
+                  />
                 )}
                 <Link href={`/tickets/${ticket.id}`}
                   className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 border border-gray-200">
@@ -311,7 +364,7 @@ export default function TicketTable({
         })}
       </div>
 
-      {/* ── Delete Confirmation Modal ──────────────────────────────────────── */}
+      {/* ── Delete Confirmation Modal ──────────────────────────────────────────── */}
       {confirmDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
           role="dialog" aria-modal="true">
@@ -332,16 +385,8 @@ export default function TicketTable({
               <span className="font-medium">"{confirmDelete.subject}"</span>
             </div>
             <div className="flex gap-3">
-              <button
-                onClick={() => setConfirmDelete(null)}
-                disabled={deleting}
-                className="btn-secondary flex-1"
-              >Cancel</button>
-              <button
-                onClick={handleDeleteConfirmed}
-                disabled={deleting}
-                className="btn-danger flex-1"
-              >
+              <button onClick={() => setConfirmDelete(null)} disabled={deleting} className="btn-secondary flex-1">Cancel</button>
+              <button onClick={handleDeleteConfirmed} disabled={deleting} className="btn-danger flex-1">
                 {deleting ? <><LoadingSpinner size="sm" /> Deleting…</> : 'Yes, Delete'}
               </button>
             </div>

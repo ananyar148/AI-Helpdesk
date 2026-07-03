@@ -28,12 +28,17 @@ export async function POST(request) {
       orderBy: { createdAt: 'desc' },
       select: {
         id: true, subject: true, description: true,
-        category: true, assignedTeam: true, priority: true,
+        category: true, assignedTeams: true, priority: true,
         draftResponse: true, status: true,
       },
     });
 
-    // Quick keyword classification for the category/team signal
+    // Normalise for classifier helper (expects assignedTeam singular)
+    const recentNorm = recentTickets.map((t) => ({
+      ...t,
+      assignedTeam: t.assignedTeams?.[0] || 'Support',
+    }));
+
     const classification = await classifyTicket(
       subject.trim(),
       description.trim(),
@@ -44,24 +49,24 @@ export async function POST(request) {
       subject:      subject.trim(),
       description:  description.trim(),
       category:     classification.category,
-      assignedTeam: classification.assignedTeam,
+      assignedTeam: classification.assignedTeam || 'Support',
     };
 
-    const { match, score, shouldWarn } = findBestMatch(newTicketData, recentTickets);
+    const { match, score, shouldWarn } = findBestMatch(newTicketData, recentNorm);
 
     if (shouldWarn && match) {
+      const original = recentTickets.find((t) => t.id === match.id);
       return NextResponse.json({
         isDuplicate:    true,
         score:          Math.round(score * 100),
         existingTicket: {
-          id:           match.id,
-          subject:      match.subject,
-          status:       match.status,
-          category:     match.category,
-          assignedTeam: match.assignedTeam,
-          priority:     match.priority,
+          id:            original.id,
+          subject:       original.subject,
+          status:        original.status,
+          category:      original.category,
+          assignedTeams: original.assignedTeams,
+          priority:      original.priority,
         },
-        // Pass pre-computed classification back so client can skip Gemini
         classification,
       });
     }

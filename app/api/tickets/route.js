@@ -9,7 +9,7 @@ import prisma from '../../../lib/prisma';
 import { classifyTicket } from '../../../lib/classifier';
 import { getUserFromRequest } from '../../../lib/auth';
 import { logActivity, buildDetail, ACTIONS } from '../../../lib/activity';
-import { findBestMatch, DUPLICATE_REUSE_THRESHOLD } from '../../../lib/duplicate';
+import { findBestMatch } from '../../../lib/duplicate';
 
 // POST /api/tickets — public ticket submission
 export async function POST(request) {
@@ -18,11 +18,9 @@ export async function POST(request) {
     const {
       subject,
       description,
-      // Optional: client passes these when they clicked "Create Anyway" after duplicate warning
       forceCreate        = false,
       duplicateOfId      = null,
       similarityScore    = null,
-      // Optional: pre-computed classification passed from check-duplicate to avoid Gemini re-call
       preClassification  = null,
     } = body;
 
@@ -52,70 +50,73 @@ export async function POST(request) {
       orderBy: { createdAt: 'desc' },
       select: {
         id: true, subject: true, description: true,
-        category: true, assignedTeam: true, priority: true,
+        category: true, assignedTeams: true, priority: true,
         draftResponse: true, status: true,
       },
     });
 
+    // Normalise for duplicate/classifier helpers (they expect assignedTeam singular)
+    const recentNorm = recentTickets.map((t) => ({
+      ...t,
+      assignedTeam: t.assignedTeams?.[0] || 'Support',
+    }));
+
     // ── Classification ────────────────────────────────────────────────────────
-    // If a pre-computed classification was passed (from check-duplicate), use it
-    // to avoid calling Gemini again.
     let classification;
     if (preClassification) {
       classification = preClassification;
     } else {
-      // Check for near-duplicate first, then classify
       const { match, score, shouldWarn } = findBestMatch(
         { subject: subject.trim(), description: description.trim(), category: '', assignedTeam: '' },
-        recentTickets
+        recentNorm
       );
 
-      // If high-similarity duplicate exists and user hasn't forced creation, warn them
       if (shouldWarn && match && !forceCreate) {
+        const original = recentTickets.find((t) => t.id === match.id);
         return NextResponse.json(
           {
             isDuplicate:    true,
             score:          Math.round(score * 100),
             existingTicket: {
-              id:           match.id,
-              subject:      match.subject,
-              status:       match.status,
-              category:     match.category,
-              assignedTeam: match.assignedTeam,
-              priority:     match.priority,
+              id:            original.id,
+              subject:       original.subject,
+              status:        original.status,
+              category:      original.category,
+              assignedTeams: original.assignedTeams,
+              priority:      original.priority,
             },
           },
-          { status: 409 } // 409 Conflict = duplicate warning
+          { status: 409 }
         );
       }
 
-      classification = await classifyTicket(
-        subject.trim(),
-        description.trim(),
-        recentTickets
-      );
+      classification = await classifyTicket(subject.trim(), description.trim(), recentNorm);
     }
+
+    // Classifier returns assignedTeam (singular) — wrap to array
+    const assignedTeams = classification.assignedTeams
+      ?? (classification.assignedTeam ? [classification.assignedTeam] : ['Support']);
 
     // ── Create ticket ─────────────────────────────────────────────────────────
     const ticket = await prisma.ticket.create({
       data: {
-        subject:        subject.trim(),
-        description:    description.trim(),
-        category:       classification.category,
-        assignedTeam:   classification.assignedTeam,
-        priority:       classification.priority,
-        draftResponse:  classification.draftResponse || null,
-        status:         'Open',
-        isDuplicate:    forceCreate && !!duplicateOfId,
-        duplicateOfId:  forceCreate && duplicateOfId ? duplicateOfId : null,
-        similarityScore:forceCreate && similarityScore ? similarityScore / 100 : null,
+        subject:         subject.trim(),
+        description:     description.trim(),
+        category:        classification.category,
+        assignedTeams,
+        priority:        classification.priority,
+        draftResponse:   classification.draftResponse || null,
+        status:          'Open',
+        isDuplicate:     forceCreate && !!duplicateOfId,
+        duplicateOfId:   forceCreate && duplicateOfId ? duplicateOfId : null,
+        similarityScore: forceCreate && similarityScore ? similarityScore / 100 : null,
       },
     });
 
     await logActivity({
       ticketId: ticket.id,
       action:   ACTIONS.CREATED,
-      detail:   buildDetail.ticketCreated(classification.category, classification.assignedTeam, classification.source),
+      detail:   buildDetail.ticketCreated(classification.category, assignedTeams, classification.source),
     });
 
     if (ticket.draftResponse) {
@@ -162,21 +163,22 @@ export async function GET(request) {
     }
 
     const { searchParams } = new URL(request.url);
-    const status    = searchParams.get('status');
-    const category  = searchParams.get('category');
-    const priority  = searchParams.get('priority');
-    const team      = searchParams.get('team');
+    const status   = searchParams.get('status');
+    const category = searchParams.get('category');
+    const priority = searchParams.get('priority');
+    const team     = searchParams.get('team');
 
     const where = {};
 
+    // TeamMembers see only tickets where their team appears in assignedTeams
     if (user.role === 'TeamMember' && user.team) {
-      where.assignedTeam = user.team;
+      where.assignedTeams = { has: user.team };
     }
 
-    if (status)                        where.status       = status;
-    if (category)                      where.category     = category;
-    if (priority)                      where.priority     = priority;
-    if (team && user.role === 'Admin') where.assignedTeam = team;
+    if (status)                        where.status   = status;
+    if (category)                      where.category = category;
+    if (priority)                      where.priority = priority;
+    if (team && user.role === 'Admin') where.assignedTeams = { has: team };
 
     const tickets = await prisma.ticket.findMany({
       where,

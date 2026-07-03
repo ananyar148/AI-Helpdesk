@@ -14,6 +14,7 @@ const ACTION_CONFIG = {
   created:            { icon: '🎫', label: 'Ticket Created',       color: 'bg-blue-100 text-blue-700' },
   status_updated:     { icon: '🔄', label: 'Status Updated',       color: 'bg-yellow-100 text-yellow-700' },
   priority_changed:   { icon: '⚡', label: 'Priority Changed',     color: 'bg-orange-100 text-orange-700' },
+  teams_updated:      { icon: '👥', label: 'Teams Updated',        color: 'bg-purple-100 text-purple-700' },
   team_reassigned:    { icon: '👥', label: 'Team Reassigned',      color: 'bg-purple-100 text-purple-700' },
   ai_draft_generated: { icon: '🤖', label: 'AI Draft Generated',   color: 'bg-indigo-100 text-indigo-700' },
   work_log_added:     { icon: '📝', label: 'Work Log Added',       color: 'bg-teal-100 text-teal-700' },

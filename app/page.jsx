@@ -160,7 +160,9 @@ export default function ClientPortal() {
                     </div>
                     <div>
                       <span className="text-gray-500 text-xs uppercase font-medium">Assigned To</span>
-                      <p className="font-medium text-gray-800 mt-0.5">{ticket.assignedTeam} Team</p>
+                      <p className="font-medium text-gray-800 mt-0.5">
+                        {(ticket.assignedTeams || (ticket.assignedTeam ? [ticket.assignedTeam] : [])).join(', ')} Team{(ticket.assignedTeams?.length ?? 1) > 1 ? 's' : ''}
+                      </p>
                     </div>
                     <div>
                       <span className="text-gray-500 text-xs uppercase font-medium">Category</span>
@@ -236,7 +238,9 @@ export default function ClientPortal() {
               <div className="flex flex-wrap gap-2 text-xs mt-2">
                 <span className="badge bg-gray-100 text-gray-600">{dupInfo.existingTicket.status}</span>
                 <span className="badge bg-purple-100 text-purple-700">{dupInfo.existingTicket.category}</span>
-                <span className="badge bg-blue-100 text-blue-700">{dupInfo.existingTicket.assignedTeam}</span>
+                {(dupInfo.existingTicket.assignedTeams || [dupInfo.existingTicket.assignedTeam]).filter(Boolean).map((t) => (
+                  <span key={t} className="badge bg-blue-100 text-blue-700">{t}</span>
+                ))}
                 <span className={`badge ${
                   dupInfo.existingTicket.priority === 'High'   ? 'bg-red-100 text-red-700' :
                   dupInfo.existingTicket.priority === 'Medium' ? 'bg-orange-100 text-orange-700' :

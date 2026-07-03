@@ -16,7 +16,7 @@ export async function GET(request, { params }) {
     const ticket = await prisma.ticket.findUnique({ where: { id } });
     if (!ticket) return NextResponse.json({ error: 'Ticket not found.' }, { status: 404 });
 
-    if (user.role === 'TeamMember' && ticket.assignedTeam !== user.team) {
+    if (user.role === 'TeamMember' && !ticket.assignedTeams.includes(user.team)) {
       return NextResponse.json({ error: 'Access denied.' }, { status: 403 });
     }
 

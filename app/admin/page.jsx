@@ -68,7 +68,9 @@ export default function AdminPage() {
     if (filters.status) result = result.filter((t) => t.status === filters.status);
     if (filters.category) result = result.filter((t) => t.category === filters.category);
     if (filters.priority) result = result.filter((t) => t.priority === filters.priority);
-    if (filters.team) result = result.filter((t) => t.assignedTeam === filters.team);
+    if (filters.team) result = result.filter((t) =>
+      (t.assignedTeams ?? (t.assignedTeam ? [t.assignedTeam] : [])).includes(filters.team)
+    );
     setFilteredTickets(result);
   }, [tickets, filters]);
 
@@ -81,7 +83,9 @@ export default function AdminPage() {
     const teams = ['Development', 'Billing', 'HR', 'Support'];
     return teams.map((team) => ({
       team,
-      count: tickets.filter((t) => t.assignedTeam === team).length,
+      count: tickets.filter((t) =>
+        (t.assignedTeams || (t.assignedTeam ? [t.assignedTeam] : [])).includes(team)
+      ).length,
     }));
   };
 

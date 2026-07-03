@@ -17,18 +17,18 @@ model Ticket {
   description   String           @db.Text
 
   // AI-classified fields
-  category      String           @default("Other")    // Billing | Bug | Feature Request | HR | Other
-  assignedTeam  String           @default("Support")  // Development | Billing | HR | Support
-  priority      String           @default("Medium")   // Low | Medium | High
+  category      String           @default("Other")       // Billing | Bug | Feature Request | HR | Other
+  assignedTeams String[]         @default(["Support"])   // e.g. ["Development", "HR"]
+  priority      String           @default("Medium")      // Low | Medium | High
   draftResponse String?          @db.Text
 
   // Workflow
-  status        String           @default("Open")     // Open | In Progress | Resolved
+  status        String           @default("Open")        // Open | In Progress | Resolved
 
   // Duplicate detection
   isDuplicate      Boolean  @default(false)
-  duplicateOfId    String?                            // ID of the original ticket
-  similarityScore  Float?                             // 0–1 Jaccard similarity
+  duplicateOfId    String?
+  similarityScore  Float?
 
   // Relations
   activities    TicketActivity[]
@@ -41,18 +41,15 @@ model Ticket {
 }
 
 // ─── Work Log ─────────────────────────────────────────────────────────────────
-// Internal team notes: investigation, fixes, QA, resolution notes, etc.
-// visibility = "Internal" → only team members/admins can see
-// visibility = "Client"   → shown to clients as final resolution
 model TicketWorkLog {
   id         String   @id @default(cuid())
   ticketId   String
   ticket     Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
 
   userId     String?
-  userName   String                            // denormalized
-  userRole   String                            // Admin | TeamMember
-  team       String?                           // which team added the log
+  userName   String
+  userRole   String
+  team       String?
 
   note       String   @db.Text
   visibility String   @default("Internal")    // Internal | Client
@@ -69,12 +66,12 @@ model TicketActivity {
   ticket     Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
 
   userId     String?
-  userName   String?                           // e.g. "Ram"
-  userRole   String?                           // Admin | TeamMember
-  userTeam   String?                           // e.g. "Development" — for audit display
+  userName   String?
+  userRole   String?
+  userTeam   String?
 
   action     String   // created | status_updated | priority_changed |
-                      // team_reassigned | ai_draft_generated | work_log_added |
+                      // teams_updated | ai_draft_generated | work_log_added |
                       // ticket_updated | ticket_deleted | duplicate_detected
 
   detail     String?  @db.Text

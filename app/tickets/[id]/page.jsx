@@ -3,7 +3,7 @@
 /**
  * Ticket Detail Page — /tickets/[id]
  * Shows full ticket info, work logs, activity timeline, and delete option.
- * Accessible to TeamMembers (own team) and Admins.
+ * Accessible to TeamMembers (any assigned team) and Admins.
  */
 
 import { useState, useEffect, useCallback } from 'react';
@@ -13,7 +13,7 @@ import Navbar from '../../components/Navbar';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import ActivityTimeline from '../../components/ActivityTimeline';
 import WorkLogPanel from '../../components/WorkLogPanel';
-import { StatusBadge, PriorityBadge, CategoryBadge, TeamBadge } from '../../components/StatusBadge';
+import { StatusBadge, PriorityBadge, CategoryBadge, TeamsDisplay, TeamBadge } from '../../components/StatusBadge';
 
 const STATUS_OPTIONS   = ['Open', 'In Progress', 'Resolved'];
 const PRIORITY_OPTIONS = ['Low', 'Medium', 'High'];
@@ -31,7 +31,10 @@ export default function TicketDetailPage() {
   const [updating,   setUpdating]   = useState(false);
   const [error,      setError]      = useState('');
   const [success,    setSuccess]    = useState('');
-  const [activeTab,  setActiveTab]  = useState('worklogs'); // worklogs | activity
+  const [activeTab,  setActiveTab]  = useState('worklogs');
+
+  // Multi-team picker state (admin only)
+  const [selectedTeams, setSelectedTeams] = useState([]);
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting,          setDeleting]          = useState(false);
@@ -55,14 +58,15 @@ export default function TicketDetailPage() {
         fetch(`/api/tickets/${id}/work-logs`),
       ]);
 
-      const ticketData   = await ticketRes.json();
-      const workLogData  = await workLogRes.json();
+      const ticketData  = await ticketRes.json();
+      const workLogData = await workLogRes.json();
 
       if (!ticketRes.ok) throw new Error(ticketData.error || 'Failed to load ticket');
 
       setTicket(ticketData.ticket);
       setActivities(ticketData.ticket.activities || []);
       setWorkLogs(workLogData.workLogs || []);
+      setSelectedTeams(ticketData.ticket.assignedTeams || []);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -72,7 +76,7 @@ export default function TicketDetailPage() {
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
-  // Update field
+  // Update a single field (status, priority)
   const handleUpdate = async (field, value) => {
     if (!ticket || value === ticket[field]) return;
     setUpdating(true);
@@ -87,8 +91,7 @@ export default function TicketDetailPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Update failed');
       setTicket(data.ticket);
-      setSuccess(`Updated successfully.`);
-      // Refresh activities
+      setSuccess('Updated successfully.');
       const aRes  = await fetch(`/api/tickets/${id}/activity`);
       const aData = await aRes.json();
       if (aRes.ok) setActivities(aData.activities);
@@ -99,6 +102,43 @@ export default function TicketDetailPage() {
       setUpdating(false);
     }
   };
+
+  // Save multi-team selection
+  const handleTeamsSave = async () => {
+    if (selectedTeams.length === 0) { setError('Select at least one team.'); return; }
+    setUpdating(true);
+    setError('');
+    setSuccess('');
+    try {
+      const res  = await fetch(`/api/tickets/${id}`, {
+        method:  'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ assignedTeams: selectedTeams }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Update failed');
+      setTicket(data.ticket);
+      setSelectedTeams(data.ticket.assignedTeams);
+      setSuccess('Teams updated.');
+      const aRes  = await fetch(`/api/tickets/${id}/activity`);
+      const aData = await aRes.json();
+      if (aRes.ok) setActivities(aData.activities);
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  const toggleTeam = (team) =>
+    setSelectedTeams((prev) =>
+      prev.includes(team) ? prev.filter((t) => t !== team) : [...prev, team]
+    );
+
+  const teamsChanged = ticket
+    ? JSON.stringify([...selectedTeams].sort()) !== JSON.stringify([...(ticket.assignedTeams || [])].sort())
+    : false;
 
   // Delete
   const handleDelete = async () => {
@@ -116,14 +156,13 @@ export default function TicketDetailPage() {
     }
   };
 
-  const canDelete  = user && (
+  const teams     = ticket?.assignedTeams || [];
+  const canAccess = user && ticket && (
     user.role === 'Admin' ||
-    (user.role === 'TeamMember' && ticket && ticket.assignedTeam === user.team)
+    (user.role === 'TeamMember' && teams.includes(user.team))
   );
-  const canAddLog  = user && (
-    user.role === 'Admin' ||
-    (user.role === 'TeamMember' && ticket && ticket.assignedTeam === user.team)
-  );
+  const canDelete  = canAccess;
+  const canAddLog  = canAccess;
 
   const formatDate = (d) =>
     new Date(d).toLocaleString('en-US', {
@@ -131,7 +170,6 @@ export default function TicketDetailPage() {
       hour: '2-digit', minute: '2-digit',
     });
 
-  // ── Loading / Error ──────────────────────────────────────────────────────
   if (loading || !user) {
     return (
       <div className="min-h-screen bg-gray-50">
@@ -177,16 +215,14 @@ export default function TicketDetailPage() {
             </svg>{error}
           </div>
         )}
-        {success && (
-          <div className="alert-success mb-4 text-sm">{success}</div>
-        )}
+        {success && <div className="alert-success mb-4 text-sm">{success}</div>}
 
         <div className="grid lg:grid-cols-3 gap-6">
 
           {/* ── Left ──────────────────────────────────────────────────────── */}
           <div className="lg:col-span-2 space-y-5">
 
-            {/* Header */}
+            {/* Header card */}
             <div className="card">
               <div className="flex items-start justify-between gap-4 mb-3">
                 <div className="flex-1 min-w-0">
@@ -225,7 +261,7 @@ export default function TicketDetailPage() {
                 <StatusBadge   status={ticket.status} />
                 <PriorityBadge priority={ticket.priority} />
                 <CategoryBadge category={ticket.category} />
-                <TeamBadge     team={ticket.assignedTeam} />
+                <TeamsDisplay  assignedTeams={teams} />
               </div>
 
               <p className="text-xs text-gray-400 mt-3">
@@ -245,7 +281,7 @@ export default function TicketDetailPage() {
               </div>
             )}
 
-            {/* Tabs: Work Logs / Activity */}
+            {/* Tabs */}
             <div className="card">
               <div className="flex gap-1 mb-5 border-b border-gray-100 pb-3">
                 {[
@@ -264,11 +300,7 @@ export default function TicketDetailPage() {
               </div>
 
               {activeTab === 'worklogs' && (
-                <WorkLogPanel
-                  ticketId={id}
-                  workLogs={workLogs}
-                  canAddLog={canAddLog}
-                />
+                <WorkLogPanel ticketId={id} workLogs={workLogs} canAddLog={canAddLog} />
               )}
               {activeTab === 'activity' && (
                 <ActivityTimeline activities={activities} />
@@ -297,14 +329,36 @@ export default function TicketDetailPage() {
               </select>
             </div>
 
+            {/* Multi-team assignment — Admin only */}
             {user.role === 'Admin' && (
               <div className="card">
-                <label className="input-label">Assigned Team</label>
-                <select value={ticket.assignedTeam}
-                  onChange={(e) => handleUpdate('assignedTeam', e.target.value)}
-                  disabled={updating} className="input-field mt-1">
-                  {TEAM_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
-                </select>
+                <label className="input-label mb-2 block">Assigned Teams</label>
+                <div className="space-y-2 mb-3">
+                  {TEAM_OPTIONS.map((t) => (
+                    <label key={t} className="flex items-center gap-2.5 cursor-pointer group">
+                      <input
+                        type="checkbox"
+                        checked={selectedTeams.includes(t)}
+                        onChange={() => toggleTeam(t)}
+                        className="accent-blue-600 w-4 h-4"
+                        disabled={updating}
+                      />
+                      <TeamBadge team={t} />
+                    </label>
+                  ))}
+                </div>
+                {teamsChanged && (
+                  <button
+                    onClick={handleTeamsSave}
+                    disabled={updating || selectedTeams.length === 0}
+                    className="btn-primary text-sm w-full"
+                  >
+                    {updating ? <><LoadingSpinner size="sm" /> Saving…</> : 'Save Teams'}
+                  </button>
+                )}
+                {selectedTeams.length === 0 && (
+                  <p className="text-xs text-red-500 mt-1">At least one team required.</p>
+                )}
               </div>
             )}
 
@@ -319,7 +373,10 @@ export default function TicketDetailPage() {
               <p><span className="font-medium text-gray-600">ID:</span>{' '}
                 <span className="font-mono break-all">{ticket.id}</span></p>
               <p><span className="font-medium text-gray-600">Category:</span> {ticket.category}</p>
-              <p><span className="font-medium text-gray-600">Team:</span> {ticket.assignedTeam}</p>
+              <div className="flex items-start gap-1 flex-wrap">
+                <span className="font-medium text-gray-600">Teams:</span>
+                <TeamsDisplay assignedTeams={teams} />
+              </div>
               {ticket.isDuplicate && (
                 <p className="text-pink-600 font-medium">⚠ Marked as duplicate</p>
               )}

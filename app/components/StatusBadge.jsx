@@ -51,7 +51,7 @@ export function CategoryBadge({ category }) {
 }
 
 /**
- * TeamBadge — colour-coded pill for assigned team.
+ * TeamBadge — colour-coded pill for a single assigned team.
  */
 export function TeamBadge({ team }) {
   const colorMap = {
@@ -63,6 +63,20 @@ export function TeamBadge({ team }) {
   return (
     <span className={`badge ${colorMap[team] || 'bg-gray-100 text-gray-600'}`}>
       {team}
+    </span>
+  );
+}
+
+/**
+ * TeamsDisplay — renders one badge per team for multi-team tickets.
+ * Accepts either assignedTeams (array) or assignedTeam (legacy string).
+ */
+export function TeamsDisplay({ assignedTeams, assignedTeam }) {
+  const teams = assignedTeams ?? (assignedTeam ? [assignedTeam] : []);
+  if (teams.length === 0) return <TeamBadge team="Support" />;
+  return (
+    <span className="flex flex-wrap gap-1">
+      {teams.map((t) => <TeamBadge key={t} team={t} />)}
     </span>
   );
 }
