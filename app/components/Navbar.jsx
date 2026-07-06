@@ -43,8 +43,8 @@ export default function Navbar() {
           { href: '/dashboard', label: 'My Dashboard' },
         ]
     : [
-        { href: '/',      label: 'Submit Ticket' },
-        { href: '/login', label: 'Team Login' },
+        { href: '/portal', label: 'Client Portal' },
+        { href: '/login',  label: 'Team Login' },
       ];
 
   return (
@@ -110,12 +110,20 @@ export default function Navbar() {
                 </button>
               </>
             ) : (
-              <Link
-                href="/login"
-                className="btn-primary text-xs px-4 py-2"
-              >
-                Team Login
-              </Link>
+              <div className="flex items-center gap-2">
+                <Link
+                  href="/portal"
+                  className="text-sm font-medium text-blue-600 hover:text-blue-700 px-3 py-2 rounded-lg hover:bg-blue-50 transition-colors"
+                >
+                  Client Portal
+                </Link>
+                <Link
+                  href="/login"
+                  className="btn-primary text-xs px-4 py-2"
+                >
+                  Team Login
+                </Link>
+              </div>
             )}
           </div>
 

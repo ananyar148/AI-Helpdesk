@@ -17,9 +17,9 @@ model Ticket {
   description   String           @db.Text
 
   // AI-classified fields
-  category      String           @default("Other")       // Billing | Bug | Feature Request | HR | Other
-  assignedTeams String[]         @default(["Support"])   // e.g. ["Development", "HR"]
-  priority      String           @default("Medium")      // Low | Medium | High
+  category      String           @default("Other")
+  assignedTeams String[]         @default(["Support"])
+  priority      String           @default("Medium")
   draftResponse String?          @db.Text
 
   // Workflow
@@ -30,17 +30,42 @@ model Ticket {
   duplicateOfId    String?
   similarityScore  Float?
 
-  // Client contact — stored at submission for resolution emails
+  // Client contact
   clientEmail      String?
+
+  // Client portal — Google-authenticated client who submitted this ticket
+  clientUserId     String?
+  clientUser       ClientUser?      @relation(fields: [clientUserId], references: [id], onDelete: SetNull)
+
+  // Follow-up thread — links a follow-up ticket back to the original
+  parentTicketId   String?
 
   // Relations
   activities    TicketActivity[]
   workLogs      TicketWorkLog[]
+  attachments   TicketAttachment[]
 
   createdAt     DateTime         @default(now())
   updatedAt     DateTime         @updatedAt
 
   @@map("tickets")
+}
+
+// ─── Ticket Attachment ────────────────────────────────────────────────────────
+// Images stored as base64 data URLs in the database (no external storage needed)
+model TicketAttachment {
+  id         String   @id @default(cuid())
+  ticketId   String
+  ticket     Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  fileName   String
+  mimeType   String
+  dataUrl    String   @db.Text    // base64 data URL: "data:image/png;base64,..."
+  sizeBytes  Int
+
+  createdAt  DateTime @default(now())
+
+  @@map("ticket_attachments")
 }
 
 // ─── Work Log ─────────────────────────────────────────────────────────────────
@@ -55,7 +80,7 @@ model TicketWorkLog {
   team       String?
 
   note       String   @db.Text
-  visibility String   @default("Internal")    // Internal | Client
+  visibility String   @default("Internal")
 
   createdAt  DateTime @default(now())
 
@@ -73,10 +98,7 @@ model TicketActivity {
   userRole   String?
   userTeam   String?
 
-  action     String   // created | status_updated | priority_changed |
-                      // teams_updated | ai_draft_generated | work_log_added |
-                      // ticket_updated | ticket_deleted | duplicate_detected
-
+  action     String
   detail     String?  @db.Text
   oldValue   String?
   newValue   String?
@@ -86,17 +108,34 @@ model TicketActivity {
   @@map("ticket_activities")
 }
 
-// ─── User ─────────────────────────────────────────────────────────────────────
+// ─── Team User (staff) ────────────────────────────────────────────────────────
 model User {
   id        String   @id @default(cuid())
   name      String
   email     String   @unique
   password  String
-  role      String   @default("TeamMember")   // Admin | TeamMember
-  team      String?                            // Development | Billing | HR | Support
+  role      String   @default("TeamMember")
+  team      String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@map("users")
+}
+
+// ─── Client User (Google OAuth) ───────────────────────────────────────────────
+// Clients who sign in via Google to the client portal
+model ClientUser {
+  id            String    @id @default(cuid())
+  googleId      String    @unique   // Google's sub identifier
+  email         String    @unique
+  name          String
+  picture       String?             // Google profile picture URL
+
+  tickets       Ticket[]
+
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@map("client_users")
 }

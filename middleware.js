@@ -55,5 +55,6 @@ export const config = {
     '/admin/:path*',
     '/tickets/:path*',
     '/settings/:path*',
+    // /portal/* is intentionally excluded — protected by NextAuth session, not JWT
   ],
 };
