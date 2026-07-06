@@ -22,6 +22,8 @@ const ACTION_CONFIG = {
   ticket_deleted:     { icon: '🗑️', label: 'Ticket Deleted',         color: 'bg-red-100 text-red-700' },
   duplicate_detected: { icon: '🔁', label: 'Duplicate Detected',     color: 'bg-pink-100 text-pink-700' },
   details_requested:  { icon: '📧', label: 'Details Requested',      color: 'bg-amber-100 text-amber-700' },
+  details_provided:   { icon: '💬', label: 'Details Provided',        color: 'bg-green-100 text-green-700' },
+  follow_up_added:    { icon: '↩️', label: 'Follow-up Added',         color: 'bg-blue-100 text-blue-700' },
 };
 
 function formatTime(dateStr) {
@@ -112,8 +114,24 @@ export default function ActivityTimeline({ activities = [] }) {
                       </div>
                     )}
 
-                    {/* Before → After values (skip for details_requested since newValue is the message) */}
-                    {activity.action !== 'details_requested' && (activity.oldValue || activity.newValue) && (
+                    {/* For details_provided: show the details the client submitted */}
+                    {activity.action === 'details_provided' && activity.newValue && (
+                      <div className="mt-2 p-3 bg-green-50 border border-green-200 rounded-lg">
+                        <p className="text-xs font-semibold text-green-700 uppercase mb-1">Details from client</p>
+                        <p className="text-sm text-green-900 leading-snug">{activity.newValue}</p>
+                      </div>
+                    )}
+
+                    {/* For follow_up_added: show the follow-up message */}
+                    {activity.action === 'follow_up_added' && activity.newValue && (
+                      <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                        <p className="text-xs font-semibold text-blue-700 uppercase mb-1">Client message</p>
+                        <p className="text-sm text-blue-900 leading-snug">{activity.newValue}</p>
+                      </div>
+                    )}
+
+                    {/* Before → After values (skip for message-based actions) */}
+                    {!['details_requested', 'details_provided', 'follow_up_added'].includes(activity.action) && (activity.oldValue || activity.newValue) && (
                       <div className="flex items-center gap-2 mt-1.5 text-xs">
                         {activity.oldValue && (
                           <span className="px-2 py-0.5 rounded-md bg-red-50 text-red-600 line-through font-medium">

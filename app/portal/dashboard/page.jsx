@@ -224,10 +224,37 @@ function TicketForm({ clientEmail, onSuccess, parentTicket = null, onCancel }) {
 }
 
 // ─── Ticket card ──────────────────────────────────────────────────────────────
-function TicketCard({ ticket, clientEmail, onFollowUpSuccess }) {
-  const [expanded,    setExpanded]    = useState(false);
-  const [showForm,    setShowForm]    = useState(false);
+function TicketCard({ ticket, clientEmail }) {
+  const [expanded,     setExpanded]   = useState(false);
+  const [activeAction, setActiveAction] = useState(null); // 'follow-up' | 'provide-details' | null
+  const [messageText,  setMessageText] = useState('');
+  const [submitting,   setSubmitting]  = useState(false);
+  const [msg,          setMsg]         = useState('');
 
+  const handleAction = async (endpoint, successText) => {
+    if (!messageText.trim()) return;
+    setSubmitting(true);
+    setMsg('');
+    try {
+      const res  = await fetch(`/api/portal/tickets/${ticket.id}/${endpoint}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientEmail, message: messageText.trim(), details: messageText.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to submit');
+      setMsg(`✓ ${successText}`);
+      setMessageText('');
+      setTimeout(() => { setMsg(''); setActiveAction(null); }, 2500);
+    } catch (e) {
+      setMsg(`Error: ${e.message}`);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const closeAction = () => { setActiveAction(null); setMessageText(''); setMsg(''); };
+
+  return (
   return (
     <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
       <div className="p-5">
@@ -242,12 +269,7 @@ function TicketCard({ ticket, clientEmail, onFollowUpSuccess }) {
                   {ticket.priority}
                 </span>
               )}
-              {ticket.category && (
-                <span className="text-xs text-gray-400">{ticket.category}</span>
-              )}
-              {ticket.parentTicketId && (
-                <span className="text-xs bg-purple-50 text-purple-600 px-2 py-0.5 rounded-full">Follow-up</span>
-              )}
+              {ticket.category && <span className="text-xs text-gray-400">{ticket.category}</span>}
             </div>
             <h3 className="font-semibold text-gray-900 text-sm leading-snug">{ticket.subject}</h3>
             <p className="text-xs text-gray-400 mt-1">Submitted {formatDate(ticket.createdAt)}</p>
@@ -271,9 +293,7 @@ function TicketCard({ ticket, clientEmail, onFollowUpSuccess }) {
 
           {ticket.draftResponse && (
             <div className="bg-blue-50 border border-blue-100 rounded-lg p-4">
-              <p className="text-xs font-medium text-blue-700 uppercase tracking-wide mb-1.5">
-                ✨ AI Suggested Response
-              </p>
+              <p className="text-xs font-medium text-blue-700 uppercase tracking-wide mb-1.5">✨ AI Suggested Response</p>
               <p className="text-sm text-blue-800 whitespace-pre-wrap">{ticket.draftResponse}</p>
             </div>
           )}
@@ -294,26 +314,49 @@ function TicketCard({ ticket, clientEmail, onFollowUpSuccess }) {
             </div>
           )}
 
-          {!ticket.parentTicketId && ticket.status !== 'Resolved' && (
-            <div>
-              {showForm ? (
-                <div className="border-t border-gray-100 pt-4">
-                  <p className="text-sm font-semibold text-gray-700 mb-3">Add a follow-up</p>
-                  <TicketForm
-                    clientEmail={clientEmail}
-                    parentTicket={ticket}
-                    onSuccess={(newTicket) => { setShowForm(false); onFollowUpSuccess(newTicket); }}
-                    onCancel={() => setShowForm(false)}
-                  />
+          {ticket.status !== 'Resolved' && (
+            <div className="border-t border-gray-100 pt-4">
+              {activeAction ? (
+                <div>
+                  <p className="text-sm font-semibold text-gray-700 mb-2">
+                    {activeAction === 'follow-up' ? 'Add a Follow-up' : 'Provide Additional Details'}
+                  </p>
+                  {msg && (
+                    <p className={`text-sm mb-2 ${msg.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>{msg}</p>
+                  )}
+                  <textarea value={messageText} onChange={(e) => setMessageText(e.target.value)}
+                    rows={4}
+                    placeholder={activeAction === 'follow-up'
+                      ? 'Add more context or an update to this ticket…'
+                      : 'Share the additional details our team requested…'}
+                    className="input-field resize-none text-sm mb-3" disabled={submitting} />
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleAction(activeAction, activeAction === 'follow-up' ? 'Follow-up added.' : 'Details submitted.')}
+                      disabled={submitting || !messageText.trim()}
+                      className="btn-primary text-sm">
+                      {submitting ? <><LoadingSpinner size="sm" /> Submitting…</> : 'Submit'}
+                    </button>
+                    <button onClick={closeAction} className="btn-secondary text-sm">Cancel</button>
+                  </div>
                 </div>
               ) : (
-                <button onClick={() => setShowForm(true)}
-                  className="text-sm text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/>
-                  </svg>
-                  Add follow-up
-                </button>
+                <div className="flex flex-wrap gap-3">
+                  <button onClick={() => setActiveAction('follow-up')}
+                    className="text-sm text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/>
+                    </svg>
+                    Add follow-up
+                  </button>
+                  <button onClick={() => setActiveAction('provide-details')}
+                    className="text-sm text-amber-600 hover:text-amber-700 font-medium flex items-center gap-1">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+                    </svg>
+                    Provide details
+                  </button>
+                </div>
               )}
             </div>
           )}
@@ -362,10 +405,6 @@ export default function PortalDashboard() {
   const handleNewTicket = (ticket) => {
     setTickets((prev) => [ticket, ...prev]);
     setShowForm(false);
-  };
-
-  const handleFollowUp = (ticket) => {
-    setTickets((prev) => [ticket, ...prev]);
   };
 
   const filtered = statusFilter === 'All'
@@ -506,7 +545,6 @@ export default function PortalDashboard() {
                 key={ticket.id}
                 ticket={ticket}
                 clientEmail={user.email}
-                onFollowUpSuccess={handleFollowUp}
               />
             ))}
           </div>
