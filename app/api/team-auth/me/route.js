@@ -1,6 +1,6 @@
 /**
- * /api/auth/me
- * GET - Return the current authenticated user from cookie.
+ * /api/team-auth/me
+ * GET - Return the current authenticated team member from cookie.
  */
 
 import { NextResponse } from 'next/server';
@@ -14,12 +14,6 @@ export async function GET(request) {
   }
 
   return NextResponse.json({
-    user: {
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      role: user.role,
-      team: user.team,
-    },
+    user: { id: user.id, name: user.name, email: user.email, role: user.role, team: user.team },
   });
 }

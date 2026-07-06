@@ -48,7 +48,7 @@ export default function TicketDetailPage() {
 
   // Auth
   useEffect(() => {
-    fetch('/api/auth/me')
+    fetch('/api/team-auth/me')
       .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then((d) => { if (d.user) setUser(d.user); else router.push('/login'); })
       .catch(() => router.push('/login'));

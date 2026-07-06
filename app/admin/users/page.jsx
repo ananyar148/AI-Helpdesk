@@ -44,7 +44,7 @@ export default function UsersPage() {
 
   // Auth check
   useEffect(() => {
-    fetch('/api/auth/me')
+    fetch('/api/team-auth/me')
       .then((r) => r.ok ? r.json() : Promise.reject())
       .then((d) => { if (!d.user || d.user.role !== 'Admin') router.push('/login'); })
       .catch(() => router.push('/login'));

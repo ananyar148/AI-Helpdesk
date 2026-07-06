@@ -30,7 +30,7 @@ export default function DashboardPage() {
 
   // Fetch current user
   useEffect(() => {
-    fetch('/api/auth/me')
+    fetch('/api/team-auth/me')
       .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then((data) => {
         if (!data.user) {

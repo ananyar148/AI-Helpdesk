@@ -17,7 +17,7 @@ export default function Navbar() {
 
   // Fetch current user on mount
   useEffect(() => {
-    fetch('/api/auth/me')
+    fetch('/api/team-auth/me')
       .then((r) => r.ok ? r.json() : null)
       .then((data) => {
         if (data?.user) setUser(data.user);
@@ -26,7 +26,7 @@ export default function Navbar() {
   }, [pathname]);
 
   const handleLogout = async () => {
-    await fetch('/api/auth/logout', { method: 'POST' });
+    await fetch('/api/team-auth/logout', { method: 'POST' });
     setUser(null);
     router.push('/login');
   };

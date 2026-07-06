@@ -22,7 +22,7 @@ export default function SettingsPage() {
 
   // Auth check
   useEffect(() => {
-    fetch('/api/auth/me')
+    fetch('/api/team-auth/me')
       .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then((data) => {
         if (!data.user) { router.push('/login'); return; }
@@ -50,7 +50,7 @@ export default function SettingsPage() {
     setStatus('loading');
 
     try {
-      const res = await fetch('/api/auth/change-password', {
+      const res = await fetch('/api/team-auth/change-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ currentPassword, newPassword }),

@@ -255,7 +255,6 @@ function TicketCard({ ticket, clientEmail }) {
   const closeAction = () => { setActiveAction(null); setMessageText(''); setMsg(''); };
 
   return (
-  return (
     <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
       <div className="p-5">
         <div className="flex items-start justify-between gap-3">

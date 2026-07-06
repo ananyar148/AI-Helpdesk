@@ -29,7 +29,7 @@ export default function AdminPage() {
 
   // Auth check
   useEffect(() => {
-    fetch('/api/auth/me')
+    fetch('/api/team-auth/me')
       .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then((data) => {
         if (!data.user || data.user.role !== 'Admin') {

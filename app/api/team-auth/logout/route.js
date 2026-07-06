@@ -1,5 +1,5 @@
 /**
- * /api/auth/logout
+ * /api/team-auth/logout
  * POST - Clear the auth cookie.
  */
 
@@ -12,7 +12,7 @@ export async function POST() {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
-    maxAge: 0, // expire immediately
+    maxAge: 0,
     path: '/',
   });
 
