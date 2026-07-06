@@ -11,16 +11,17 @@
  */
 
 const ACTION_CONFIG = {
-  created:            { icon: '🎫', label: 'Ticket Created',       color: 'bg-blue-100 text-blue-700' },
-  status_updated:     { icon: '🔄', label: 'Status Updated',       color: 'bg-yellow-100 text-yellow-700' },
-  priority_changed:   { icon: '⚡', label: 'Priority Changed',     color: 'bg-orange-100 text-orange-700' },
-  teams_updated:      { icon: '👥', label: 'Teams Updated',        color: 'bg-purple-100 text-purple-700' },
-  team_reassigned:    { icon: '👥', label: 'Team Reassigned',      color: 'bg-purple-100 text-purple-700' },
-  ai_draft_generated: { icon: '🤖', label: 'AI Draft Generated',   color: 'bg-indigo-100 text-indigo-700' },
-  work_log_added:     { icon: '📝', label: 'Work Log Added',       color: 'bg-teal-100 text-teal-700' },
-  ticket_updated:     { icon: '✏️', label: 'Ticket Updated',       color: 'bg-gray-100 text-gray-700' },
-  ticket_deleted:     { icon: '🗑️', label: 'Ticket Deleted',       color: 'bg-red-100 text-red-700' },
-  duplicate_detected: { icon: '🔁', label: 'Duplicate Detected',   color: 'bg-pink-100 text-pink-700' },
+  created:            { icon: '🎫', label: 'Ticket Created',         color: 'bg-blue-100 text-blue-700' },
+  status_updated:     { icon: '🔄', label: 'Status Updated',         color: 'bg-yellow-100 text-yellow-700' },
+  priority_changed:   { icon: '⚡', label: 'Priority Changed',       color: 'bg-orange-100 text-orange-700' },
+  teams_updated:      { icon: '👥', label: 'Teams Updated',          color: 'bg-purple-100 text-purple-700' },
+  team_reassigned:    { icon: '👥', label: 'Team Reassigned',        color: 'bg-purple-100 text-purple-700' },
+  ai_draft_generated: { icon: '🤖', label: 'AI Draft Generated',     color: 'bg-indigo-100 text-indigo-700' },
+  work_log_added:     { icon: '📝', label: 'Work Log Added',         color: 'bg-teal-100 text-teal-700' },
+  ticket_updated:     { icon: '✏️', label: 'Ticket Updated',         color: 'bg-gray-100 text-gray-700' },
+  ticket_deleted:     { icon: '🗑️', label: 'Ticket Deleted',         color: 'bg-red-100 text-red-700' },
+  duplicate_detected: { icon: '🔁', label: 'Duplicate Detected',     color: 'bg-pink-100 text-pink-700' },
+  details_requested:  { icon: '📧', label: 'Details Requested',      color: 'bg-amber-100 text-amber-700' },
 };
 
 function formatTime(dateStr) {
@@ -103,8 +104,16 @@ export default function ActivityTimeline({ activities = [] }) {
                       </p>
                     )}
 
-                    {/* Before → After values */}
-                    {(activity.oldValue || activity.newValue) && (
+                    {/* For details_requested: show the message sent to the client */}
+                    {activity.action === 'details_requested' && activity.newValue && (
+                      <div className="mt-2 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                        <p className="text-xs font-semibold text-amber-700 uppercase mb-1">Message sent to client</p>
+                        <p className="text-sm text-amber-900 leading-snug">{activity.newValue}</p>
+                      </div>
+                    )}
+
+                    {/* Before → After values (skip for details_requested since newValue is the message) */}
+                    {activity.action !== 'details_requested' && (activity.oldValue || activity.newValue) && (
                       <div className="flex items-center gap-2 mt-1.5 text-xs">
                         {activity.oldValue && (
                           <span className="px-2 py-0.5 rounded-md bg-red-50 text-red-600 line-through font-medium">

@@ -39,6 +39,13 @@ export default function TicketDetailPage() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting,          setDeleting]          = useState(false);
 
+  // Request more details modal
+  const [showDetailsModal,  setShowDetailsModal]  = useState(false);
+  const [detailsMessage,    setDetailsMessage]    = useState('');
+  const [sendingDetails,    setSendingDetails]    = useState(false);
+  const [detailsError,      setDetailsError]      = useState('');
+  const [detailsSuccess,    setDetailsSuccess]    = useState('');
+
   // Auth
   useEffect(() => {
     fetch('/api/auth/me')
@@ -156,6 +163,34 @@ export default function TicketDetailPage() {
     }
   };
 
+  // Send "request more details" email to client
+  const handleRequestDetails = async () => {
+    if (!detailsMessage.trim() || detailsMessage.trim().length < 10) {
+      setDetailsError('Please enter at least 10 characters.'); return;
+    }
+    setSendingDetails(true);
+    setDetailsError('');
+    try {
+      const res  = await fetch(`/api/tickets/${id}/request-details`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: detailsMessage.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to send');
+      setDetailsSuccess(data.message);
+      setDetailsMessage('');
+      // Refresh activity timeline
+      const aRes  = await fetch(`/api/tickets/${id}/activity`);
+      const aData = await aRes.json();
+      if (aRes.ok) setActivities(aData.activities);
+      setTimeout(() => { setDetailsSuccess(''); setShowDetailsModal(false); }, 2500);
+    } catch (err) {
+      setDetailsError(err.message);
+    } finally {
+      setSendingDetails(false);
+    }
+  };
+
   const teams     = ticket?.assignedTeams || [];
   const canAccess = user && ticket && (
     user.role === 'Admin' ||
@@ -244,14 +279,26 @@ export default function TicketDetailPage() {
                   )}
                 </div>
                 {canDelete && (
-                  <button onClick={() => setShowDeleteConfirm(true)}
-                    className="flex-shrink-0 btn-danger text-xs px-3 py-1.5" disabled={deleting}>
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
-                    </svg>
-                    Delete
-                  </button>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    {ticket.clientEmail && (
+                      <button onClick={() => { setShowDetailsModal(true); setDetailsError(''); setDetailsSuccess(''); }}
+                        className="btn-secondary text-xs px-3 py-1.5 flex items-center gap-1.5">
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                            d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+                        </svg>
+                        Request Details
+                      </button>
+                    )}
+                    <button onClick={() => setShowDeleteConfirm(true)}
+                      className="btn-danger text-xs px-3 py-1.5 flex items-center gap-1.5" disabled={deleting}>
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                          d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                      </svg>
+                      Delete
+                    </button>
+                  </div>
                 )}
               </div>
 
@@ -384,6 +431,60 @@ export default function TicketDetailPage() {
           </div>
         </div>
       </main>
+
+      {/* Request Details Modal */}
+      {showDetailsModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
+          role="dialog" aria-modal="true">
+          <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center flex-shrink-0">
+                <svg className="w-5 h-5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                    d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+                </svg>
+              </div>
+              <div>
+                <h3 className="font-semibold text-gray-900">Request More Details</h3>
+                <p className="text-sm text-gray-500">
+                  An email will be sent to <span className="font-medium text-gray-700">{ticket.clientEmail}</span>
+                </p>
+              </div>
+            </div>
+
+            {detailsError   && <p className="mb-3 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{detailsError}</p>}
+            {detailsSuccess && <p className="mb-3 p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-700">{detailsSuccess}</p>}
+
+            {!detailsSuccess && (
+              <>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                    Message to client <span className="text-red-500">*</span>
+                  </label>
+                  <textarea
+                    value={detailsMessage}
+                    onChange={e => setDetailsMessage(e.target.value)}
+                    rows={5}
+                    placeholder="e.g. Could you please provide the exact error message you see? Also, which browser and OS are you using?"
+                    className="input-field resize-none text-sm"
+                    disabled={sendingDetails}
+                    autoFocus
+                  />
+                  <p className="text-xs text-gray-400 mt-1 text-right">{detailsMessage.length} chars</p>
+                </div>
+                <div className="flex gap-3">
+                  <button onClick={() => setShowDetailsModal(false)} disabled={sendingDetails}
+                    className="btn-secondary flex-1">Cancel</button>
+                  <button onClick={handleRequestDetails} disabled={sendingDetails || detailsMessage.trim().length < 10}
+                    className="btn-primary flex-1">
+                    {sendingDetails ? <><LoadingSpinner size="sm" /> Sending…</> : 'Send Email'}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Delete Modal */}
       {showDeleteConfirm && (
