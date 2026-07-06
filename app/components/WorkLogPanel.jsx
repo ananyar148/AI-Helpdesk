@@ -10,8 +10,7 @@ import { useState } from 'react';
 import LoadingSpinner from './LoadingSpinner';
 
 const VISIBILITY_OPTIONS = [
-  { value: 'Internal', label: 'Internal (team only)',  color: 'bg-orange-100 text-orange-700' },
-  { value: 'Client',   label: 'Client (visible to client)', color: 'bg-green-100 text-green-700' },
+  { value: 'Internal', label: 'Internal (team only)', color: 'bg-orange-100 text-orange-700' },
 ];
 
 function formatTime(dateStr) {
@@ -24,7 +23,6 @@ function formatTime(dateStr) {
 export default function WorkLogPanel({ ticketId, workLogs: initialLogs, canAddLog = false }) {
   const [logs,       setLogs]       = useState(initialLogs || []);
   const [note,       setNote]       = useState('');
-  const [visibility, setVisibility] = useState('Internal');
   const [submitting, setSubmitting] = useState(false);
   const [error,      setError]      = useState('');
   const [success,    setSuccess]    = useState('');
@@ -40,7 +38,7 @@ export default function WorkLogPanel({ ticketId, workLogs: initialLogs, canAddLo
       const res  = await fetch(`/api/tickets/${ticketId}/work-logs`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ note: note.trim(), visibility }),
+        body:    JSON.stringify({ note: note.trim(), visibility: 'Internal' }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to add work log');
@@ -106,26 +104,6 @@ export default function WorkLogPanel({ ticketId, workLogs: initialLogs, canAddLo
             className="input-field resize-none mb-3 text-sm"
             disabled={submitting}
           />
-
-          {/* Visibility selector */}
-          <div className="flex items-center gap-3 mb-3 flex-wrap">
-            <span className="text-xs text-gray-500">Visibility:</span>
-            {VISIBILITY_OPTIONS.map((opt) => (
-              <label key={opt.value} className="flex items-center gap-1.5 cursor-pointer">
-                <input
-                  type="radio"
-                  name="visibility"
-                  value={opt.value}
-                  checked={visibility === opt.value}
-                  onChange={() => setVisibility(opt.value)}
-                  className="accent-blue-600"
-                />
-                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${opt.color}`}>
-                  {opt.label}
-                </span>
-              </label>
-            ))}
-          </div>
 
           <button
             type="submit"
