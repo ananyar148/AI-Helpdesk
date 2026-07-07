@@ -183,7 +183,7 @@ export async function GET(request) {
       config:   { temperature: 0 },
     });
     const ms   = Date.now() - start;
-    const text = response.text()?.trim();
+    const text = response.text?.trim();
 
     return NextResponse.json({
       status:    'connected',
@@ -210,59 +210,6 @@ export async function GET(request) {
     });
   }
 }
-</file>
-
-<file path="vercel.json">
-{
-  "functions": {
-    "app/api/tickets/route.js": {
-      "maxDuration": 60
-    },
-    "app/api/portal/tickets/route.js": {
-      "maxDuration": 60
-    },
-    "app/api/tickets/[id]/route.js": {
-      "maxDuration": 30
-    },
-    "app/api/admin/ai-status/route.js": {
-      "maxDuration": 30
-    }
-  }
-}
-</file>
-
-<file path=".gitignore">
-# Dependencies
-node_modules/
-
-# Next.js build output
-.next/
-out/
-
-# Environment variables (never commit these)
-.env
-.env.local
-.env.production
-
-# Prisma generated files
-prisma/migrations/
-
-# Google service account key — contains private key, never commit
-training.json
-*.json.key
-service-account*.json
-
-# OS
-.DS_Store
-Thumbs.db
-
-# IDE
-.vscode/
-.idea/
-
-# Logs
-*.log
-npm-debug.log*
 </file>
 
 <file path="app/api/auth/[...nextauth]/route.js">
@@ -1278,349 +1225,6 @@ main()
   .then(() => prisma.$disconnect());
 </file>
 
-<file path="lib/classifier.js">
-/**
- * AI Classification Pipeline
- *
- *   Step 1 — Custom rule-based algorithm → category, team, priority + confidence score
- *   Step 2 — Cache/DB check → if near-identical issue seen recently, reuse (skip AI call)
- *   Step 3 — High confidence: keep custom classification, call Vertex AI for draft only
- *             Low confidence:  call Vertex AI for full classification + draft
- *   Step 4 — Fallback to custom result + template draft if Vertex AI unavailable
- *
- * Uses @google/genai with Vertex AI backend (service account via GOOGLE_APPLICATION_CREDENTIALS)
- */
-
-import { GoogleGenAI }  from '@google/genai';
-import path             from 'path';
-import { readFileSync } from 'fs';
-
-// ─── Constants ────────────────────────────────────────────────────────────────
-
-const CATEGORIES = ['Billing', 'Bug', 'Feature Request', 'HR', 'Other'];
-const TEAMS      = ['Development', 'Billing', 'HR', 'Support'];
-const PRIORITIES = ['Low', 'Medium', 'High'];
-
-const HIGH_CONFIDENCE_THRESHOLD = 0.70;
-
-// ─── Step 1: Custom Rule-Based Classifier ────────────────────────────────────
-
-const RULES = [
-  {
-    phrases: [
-      'charged twice', 'double charge', 'duplicate charge', 'overcharged',
-      'wrong amount', 'incorrect charge', 'payment failed', 'payment declined',
-      'payment issue', 'refund request', 'refund my', 'billing error',
-      'credit card', 'debit card', 'money back', 'subscription charge',
-      'subscription cancelled', 'invoice payment', 'pay for', 'charged for',
-    ],
-    category: 'Billing', team: 'Billing', priority: 'High', weight: 3.0,
-  },
-  {
-    phrases: [
-      'not working', 'not loading', 'not showing', 'not displaying', 'not visible',
-      'not found', 'cannot login', "can't login", 'login failed', 'login error',
-      'page crash', 'app crash', 'crashes when', 'blank screen', 'white screen',
-      'error 500', 'error 404', '500 error', '404 error', 'internal server error',
-      'throws error', 'getting error', 'shows error', 'exception',
-      'broken', 'not responding', 'keeps freezing', 'not opening',
-      'fails to load', 'failed to', 'stuck on', 'missing data', 'data not',
-      'records not', 'button not',
-    ],
-    category: 'Bug', team: 'Development', priority: 'High', weight: 3.0,
-  },
-  {
-    phrases: [
-      'feature request', 'please add', 'can you add', 'would like to have',
-      'would be great', 'suggest adding', 'nice to have',
-      'dark mode', 'add support for', 'add the ability', 'new feature',
-      'could you implement', 'enhancement', 'improvement request',
-    ],
-    category: 'Feature Request', team: 'Development', priority: 'Low', weight: 2.5,
-  },
-  {
-    phrases: [
-      'leave request', 'annual leave', 'sick leave', 'maternity leave',
-      'paternity leave', 'leave balance', 'leave approval', 'leave pending',
-      'payroll issue', 'salary problem', 'salary discrepancy', 'wrong salary',
-      'hr policy', 'hr team', 'onboarding', 'offboarding',
-      'performance review', 'promotion request', 'contract issue', 'benefits',
-    ],
-    category: 'HR', team: 'HR', priority: 'Medium', weight: 3.0,
-  },
-  {
-    phrases: [
-      'how do i', 'how to', 'i need help', 'need assistance',
-      'forgot password', 'password reset', 'reset my password', 'lost access',
-      'account locked', 'cannot access', 'set up', 'configure',
-      'getting started', 'user guide', 'documentation', 'tutorial',
-    ],
-    category: 'Other', team: 'Support', priority: 'Low', weight: 1.5,
-  },
-];
-
-const PRIORITY_OVERRIDES = {
-  High: ['urgent', 'critical', 'asap', 'immediately', 'emergency', 'blocking',
-         'cannot work', 'production down', 'data loss', 'security issue', 'severe'],
-  Low:  ['minor', 'not urgent', 'nice to have', 'eventually', 'low priority'],
-};
-
-function normalise(text) {
-  return text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ');
-}
-
-function countPhraseMatches(text, phrases) {
-  const n = normalise(text);
-  return phrases.filter(p => n.includes(p)).length;
-}
-
-function customClassify(subject, description) {
-  const text   = `${subject} ${description}`;
-  const scores = {};
-
-  for (const rule of RULES) {
-    const matches = countPhraseMatches(text, rule.phrases);
-    if (matches > 0) scores[rule.category] = (scores[rule.category] || 0) + matches * rule.weight;
-  }
-
-  if (Object.keys(scores).length === 0) {
-    return { category: 'Other', team: 'Support', priority: 'Medium', confidence: 0 };
-  }
-
-  const sorted     = Object.entries(scores).sort((a, b) => b[1] - a[1]);
-  const [topCat, topScore] = sorted[0];
-  const totalScore = sorted.reduce((s, [, v]) => s + v, 0);
-  const confidence = totalScore > 0 ? topScore / totalScore : 0;
-
-  const rule   = RULES.find(r => r.category === topCat);
-  let priority = rule?.priority ?? 'Medium';
-  if (countPhraseMatches(text, PRIORITY_OVERRIDES.High) > 0) priority = 'High';
-  else if (countPhraseMatches(text, PRIORITY_OVERRIDES.Low) > 0) priority = 'Low';
-
-  console.log(`[classifier] Custom → ${topCat}/${rule?.team} pri=${priority} conf=${confidence.toFixed(2)}`);
-  return { category: topCat, team: rule?.team ?? 'Support', priority, confidence };
-}
-
-// ─── Step 2: Cache / Near-Duplicate Check ────────────────────────────────────
-
-function tokenise(text) {
-  return text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean);
-}
-
-function similarity(a, b) {
-  const setA = new Set(tokenise(a));
-  const setB = new Set(tokenise(b));
-  const inter = new Set([...setA].filter(x => setB.has(x)));
-  const union = new Set([...setA, ...setB]);
-  return union.size === 0 ? 0 : inter.size / union.size;
-}
-
-export function findNearDuplicate(subject, description, existingTickets) {
-  const newText = `${subject} ${description}`;
-  for (const ticket of existingTickets) {
-    if (similarity(newText, `${ticket.subject} ${ticket.description}`) >= 0.70) {
-      console.log(`[classifier] Cache hit — reusing ticket ${ticket.id}`);
-      return ticket;
-    }
-  }
-  return null;
-}
-
-// ─── Step 3: Vertex AI via @google/genai ─────────────────────────────────────
-
-function buildClient() {
-  const project  = process.env.GOOGLE_CLOUD_PROJECT;
-  const location = process.env.GOOGLE_CLOUD_LOCATION || 'us-central1';
-
-  if (!project) return null;
-
-  let credentials;
-
-  // Primary: read from env var (Vercel / production)
-  if (process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
-    try {
-      credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
-    } catch {
-      console.error('[classifier] GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON');
-      return null;
-    }
-  } else if (process.env.GOOGLE_APP_CREDENTIALS) {
-    // Fallback: read from file (local dev)
-    try {
-      const credPath = path.resolve(process.cwd(), process.env.GOOGLE_APP_CREDENTIALS);
-      credentials = JSON.parse(readFileSync(credPath, 'utf8'));
-    } catch {
-      console.error('[classifier] Cannot read service account file');
-      return null;
-    }
-  } else {
-    console.warn('[classifier] No credentials — set GOOGLE_SERVICE_ACCOUNT_JSON or GOOGLE_APP_CREDENTIALS');
-    return null;
-  }
-
-  return new GoogleGenAI({
-    vertexai: true,
-    project,
-    location,
-    googleAuthOptions: {
-      credentials,
-      scopes: ['https://www.googleapis.com/auth/cloud-platform'],
-    },
-  });
-}
-
-async function callVertexAI(subject, description, hintCategory = null, hintTeam = null) {
-  const ai = buildClient();
-  if (!ai) {
-    console.warn('[classifier] Vertex AI client not configured');
-    return null;
-  }
-
-  try {
-    const hint = hintCategory
-      ? `\nOur rule-based classifier is HIGHLY confident this is "${hintCategory}" → "${hintTeam}". Agree unless clearly wrong.`
-      : '';
-
-    const prompt = `You are a support ticket classifier for a B2B software company.
-
-Team responsibilities:
-- Development: bugs, UI errors, crashes, pages not loading/showing, feature requests, anything technical
-- Billing: ONLY actual payment problems (wrong charges, refunds, payment failures, billing disputes)
-- HR: leave requests, payroll/salary issues, HR policies, employee contracts, benefits
-- Support: general how-to, password reset, account access, documentation
-
-Critical rules:
-1. "Invoice not showing in dashboard" = Development (UI/display bug, NOT a Billing issue)
-2. "Charged twice / wrong charge / refund" = Billing (actual money problem)
-3. Any crash, error, blank screen, missing data = Development${hint}
-
-Return valid JSON matching this exact schema:
-{
-  "category": one of [${CATEGORIES.map(c => `"${c}"`).join(', ')}],
-  "priority": one of [${PRIORITIES.map(p => `"${p}"`).join(', ')}],
-  "assignedTeam": one of [${TEAMS.map(t => `"${t}"`).join(', ')}],
-  "draftResponse": "professional 2-3 sentence empathetic response to the client"
-}
-
-Subject: ${subject}
-Description: ${description}`;
-
-    const response = await ai.models.generateContent({
-      model:    'gemini-3.5-flash',
-      contents: prompt,
-      config: {
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: 'object',
-          properties: {
-            category:      { type: 'string', enum: CATEGORIES },
-            priority:      { type: 'string', enum: PRIORITIES },
-            assignedTeam:  { type: 'string', enum: TEAMS },
-            draftResponse: { type: 'string' },
-          },
-          required: ['category', 'priority', 'assignedTeam', 'draftResponse'],
-        },
-        temperature: 0.1,
-      },
-    });
-
-    const text   = response.text();
-    const parsed = JSON.parse(text);
-
-    console.log(`[classifier] Vertex AI → ${parsed.category}/${parsed.assignedTeam} pri=${parsed.priority}`);
-
-    return {
-      category:      CATEGORIES.includes(parsed.category)     ? parsed.category     : 'Other',
-      assignedTeam:  TEAMS.includes(parsed.assignedTeam)       ? parsed.assignedTeam : 'Support',
-      priority:      PRIORITIES.includes(parsed.priority)      ? parsed.priority     : 'Medium',
-      draftResponse: parsed.draftResponse || '',
-    };
-  } catch (err) {
-    console.error('[classifier] Vertex AI error:', err.message);
-    return null;
-  }
-}
-
-// ─── Fallback Draft ───────────────────────────────────────────────────────────
-
-function fallbackDraft(category, subject) {
-  const drafts = {
-    Billing:           `Thank you for reaching out about a billing concern. Our billing team will review your account and respond within 1–2 business days.`,
-    Bug:               `Thank you for reporting this issue with "${subject}". Our development team has been notified and will investigate promptly.`,
-    'Feature Request': `Thank you for your suggestion regarding "${subject}". We've logged it for our product team to evaluate.`,
-    HR:                `Thank you for contacting HR about "${subject}". Our HR team will respond within 1 business day.`,
-    Other:             `Thank you for contacting support. A team member will review "${subject}" and respond within 24–48 hours.`,
-  };
-  return drafts[category] || drafts.Other;
-}
-
-// ─── Main Entry Point ─────────────────────────────────────────────────────────
-
-export async function classifyTicket(subject, description, existingTickets = []) {
-
-  // Step 2: Cache check
-  const cached = findNearDuplicate(subject, description, existingTickets);
-  if (cached) {
-    return {
-      category:      cached.category,
-      assignedTeam:  cached.assignedTeams?.[0] || cached.assignedTeam || 'Support',
-      assignedTeams: cached.assignedTeams || [cached.assignedTeam || 'Support'],
-      priority:      cached.priority,
-      draftResponse: cached.draftResponse || fallbackDraft(cached.category, subject),
-      source:        'cache',
-    };
-  }
-
-  // Step 1: Custom classifier
-  const custom = customClassify(subject, description);
-  const needsFullClassification = custom.confidence < HIGH_CONFIDENCE_THRESHOLD;
-
-  console.log(needsFullClassification
-    ? `[classifier] Low confidence (${custom.confidence.toFixed(2)}) — Vertex AI: full classification`
-    : `[classifier] High confidence (${custom.confidence.toFixed(2)}) — Vertex AI: draft only`
-  );
-
-  // Step 3: Call Vertex AI
-  const aiResult = await callVertexAI(
-    subject, description,
-    needsFullClassification ? null : custom.category,
-    needsFullClassification ? null : custom.team,
-  );
-
-  if (aiResult) {
-    if (needsFullClassification) {
-      return {
-        category:      aiResult.category,
-        assignedTeam:  aiResult.assignedTeam,
-        assignedTeams: [aiResult.assignedTeam],
-        priority:      aiResult.priority,
-        draftResponse: aiResult.draftResponse,
-        source:        'vertex-ai',
-      };
-    }
-    return {
-      category:      custom.category,
-      assignedTeam:  custom.team,
-      assignedTeams: [custom.team],
-      priority:      custom.priority,
-      draftResponse: aiResult.draftResponse,
-      source:        'custom+vertex-draft',
-    };
-  }
-
-  // Step 4: Fallback
-  console.warn('[classifier] Vertex AI unavailable — custom classification + fallback draft');
-  return {
-    category:      custom.category,
-    assignedTeam:  custom.team,
-    assignedTeams: [custom.team],
-    priority:      custom.priority,
-    draftResponse: fallbackDraft(custom.category, subject),
-    source:        'custom-fallback',
-  };
-}
-</file>
-
 <file path="lib/duplicate.js">
 /**
  * Duplicate Detection Service
@@ -1843,6 +1447,59 @@ try {
     console.error('   → SMTP_HOST or SMTP_PORT is wrong for this email provider');
   }
 }
+</file>
+
+<file path="vercel.json">
+{
+  "functions": {
+    "app/api/tickets/route.js": {
+      "maxDuration": 60
+    },
+    "app/api/portal/tickets/route.js": {
+      "maxDuration": 60
+    },
+    "app/api/tickets/[id]/route.js": {
+      "maxDuration": 30
+    },
+    "app/api/admin/ai-status/route.js": {
+      "maxDuration": 30
+    }
+  }
+}
+</file>
+
+<file path=".gitignore">
+# Dependencies
+node_modules/
+
+# Next.js build output
+.next/
+out/
+
+# Environment variables (never commit these)
+.env
+.env.local
+.env.production
+
+# Prisma generated files
+prisma/migrations/
+
+# Google service account key — contains private key, never commit
+training.json
+*.json.key
+service-account*.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log
+npm-debug.log*
 </file>
 
 <file path="app/admin/users/page.jsx">
@@ -3480,6 +3137,349 @@ export const authOptions = {
 };
 </file>
 
+<file path="lib/classifier.js">
+/**
+ * AI Classification Pipeline
+ *
+ *   Step 1 — Custom rule-based algorithm → category, team, priority + confidence score
+ *   Step 2 — Cache/DB check → if near-identical issue seen recently, reuse (skip AI call)
+ *   Step 3 — High confidence: keep custom classification, call Vertex AI for draft only
+ *             Low confidence:  call Vertex AI for full classification + draft
+ *   Step 4 — Fallback to custom result + template draft if Vertex AI unavailable
+ *
+ * Uses @google/genai with Vertex AI backend (service account via GOOGLE_APPLICATION_CREDENTIALS)
+ */
+
+import { GoogleGenAI }  from '@google/genai';
+import path             from 'path';
+import { readFileSync } from 'fs';
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const CATEGORIES = ['Billing', 'Bug', 'Feature Request', 'HR', 'Other'];
+const TEAMS      = ['Development', 'Billing', 'HR', 'Support'];
+const PRIORITIES = ['Low', 'Medium', 'High'];
+
+const HIGH_CONFIDENCE_THRESHOLD = 0.70;
+
+// ─── Step 1: Custom Rule-Based Classifier ────────────────────────────────────
+
+const RULES = [
+  {
+    phrases: [
+      'charged twice', 'double charge', 'duplicate charge', 'overcharged',
+      'wrong amount', 'incorrect charge', 'payment failed', 'payment declined',
+      'payment issue', 'refund request', 'refund my', 'billing error',
+      'credit card', 'debit card', 'money back', 'subscription charge',
+      'subscription cancelled', 'invoice payment', 'pay for', 'charged for',
+    ],
+    category: 'Billing', team: 'Billing', priority: 'High', weight: 3.0,
+  },
+  {
+    phrases: [
+      'not working', 'not loading', 'not showing', 'not displaying', 'not visible',
+      'not found', 'cannot login', "can't login", 'login failed', 'login error',
+      'page crash', 'app crash', 'crashes when', 'blank screen', 'white screen',
+      'error 500', 'error 404', '500 error', '404 error', 'internal server error',
+      'throws error', 'getting error', 'shows error', 'exception',
+      'broken', 'not responding', 'keeps freezing', 'not opening',
+      'fails to load', 'failed to', 'stuck on', 'missing data', 'data not',
+      'records not', 'button not',
+    ],
+    category: 'Bug', team: 'Development', priority: 'High', weight: 3.0,
+  },
+  {
+    phrases: [
+      'feature request', 'please add', 'can you add', 'would like to have',
+      'would be great', 'suggest adding', 'nice to have',
+      'dark mode', 'add support for', 'add the ability', 'new feature',
+      'could you implement', 'enhancement', 'improvement request',
+    ],
+    category: 'Feature Request', team: 'Development', priority: 'Low', weight: 2.5,
+  },
+  {
+    phrases: [
+      'leave request', 'annual leave', 'sick leave', 'maternity leave',
+      'paternity leave', 'leave balance', 'leave approval', 'leave pending',
+      'payroll issue', 'salary problem', 'salary discrepancy', 'wrong salary',
+      'hr policy', 'hr team', 'onboarding', 'offboarding',
+      'performance review', 'promotion request', 'contract issue', 'benefits',
+    ],
+    category: 'HR', team: 'HR', priority: 'Medium', weight: 3.0,
+  },
+  {
+    phrases: [
+      'how do i', 'how to', 'i need help', 'need assistance',
+      'forgot password', 'password reset', 'reset my password', 'lost access',
+      'account locked', 'cannot access', 'set up', 'configure',
+      'getting started', 'user guide', 'documentation', 'tutorial',
+    ],
+    category: 'Other', team: 'Support', priority: 'Low', weight: 1.5,
+  },
+];
+
+const PRIORITY_OVERRIDES = {
+  High: ['urgent', 'critical', 'asap', 'immediately', 'emergency', 'blocking',
+         'cannot work', 'production down', 'data loss', 'security issue', 'severe'],
+  Low:  ['minor', 'not urgent', 'nice to have', 'eventually', 'low priority'],
+};
+
+function normalise(text) {
+  return text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ');
+}
+
+function countPhraseMatches(text, phrases) {
+  const n = normalise(text);
+  return phrases.filter(p => n.includes(p)).length;
+}
+
+function customClassify(subject, description) {
+  const text   = `${subject} ${description}`;
+  const scores = {};
+
+  for (const rule of RULES) {
+    const matches = countPhraseMatches(text, rule.phrases);
+    if (matches > 0) scores[rule.category] = (scores[rule.category] || 0) + matches * rule.weight;
+  }
+
+  if (Object.keys(scores).length === 0) {
+    return { category: 'Other', team: 'Support', priority: 'Medium', confidence: 0 };
+  }
+
+  const sorted     = Object.entries(scores).sort((a, b) => b[1] - a[1]);
+  const [topCat, topScore] = sorted[0];
+  const totalScore = sorted.reduce((s, [, v]) => s + v, 0);
+  const confidence = totalScore > 0 ? topScore / totalScore : 0;
+
+  const rule   = RULES.find(r => r.category === topCat);
+  let priority = rule?.priority ?? 'Medium';
+  if (countPhraseMatches(text, PRIORITY_OVERRIDES.High) > 0) priority = 'High';
+  else if (countPhraseMatches(text, PRIORITY_OVERRIDES.Low) > 0) priority = 'Low';
+
+  console.log(`[classifier] Custom → ${topCat}/${rule?.team} pri=${priority} conf=${confidence.toFixed(2)}`);
+  return { category: topCat, team: rule?.team ?? 'Support', priority, confidence };
+}
+
+// ─── Step 2: Cache / Near-Duplicate Check ────────────────────────────────────
+
+function tokenise(text) {
+  return text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean);
+}
+
+function similarity(a, b) {
+  const setA = new Set(tokenise(a));
+  const setB = new Set(tokenise(b));
+  const inter = new Set([...setA].filter(x => setB.has(x)));
+  const union = new Set([...setA, ...setB]);
+  return union.size === 0 ? 0 : inter.size / union.size;
+}
+
+export function findNearDuplicate(subject, description, existingTickets) {
+  const newText = `${subject} ${description}`;
+  for (const ticket of existingTickets) {
+    if (similarity(newText, `${ticket.subject} ${ticket.description}`) >= 0.70) {
+      console.log(`[classifier] Cache hit — reusing ticket ${ticket.id}`);
+      return ticket;
+    }
+  }
+  return null;
+}
+
+// ─── Step 3: Vertex AI via @google/genai ─────────────────────────────────────
+
+function buildClient() {
+  const project  = process.env.GOOGLE_CLOUD_PROJECT;
+  const location = process.env.GOOGLE_CLOUD_LOCATION || 'us-central1';
+
+  if (!project) return null;
+
+  let credentials;
+
+  // Primary: read from env var (Vercel / production)
+  if (process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
+    try {
+      credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
+    } catch {
+      console.error('[classifier] GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON');
+      return null;
+    }
+  } else if (process.env.GOOGLE_APP_CREDENTIALS) {
+    // Fallback: read from file (local dev)
+    try {
+      const credPath = path.resolve(process.cwd(), process.env.GOOGLE_APP_CREDENTIALS);
+      credentials = JSON.parse(readFileSync(credPath, 'utf8'));
+    } catch {
+      console.error('[classifier] Cannot read service account file');
+      return null;
+    }
+  } else {
+    console.warn('[classifier] No credentials — set GOOGLE_SERVICE_ACCOUNT_JSON or GOOGLE_APP_CREDENTIALS');
+    return null;
+  }
+
+  return new GoogleGenAI({
+    vertexai: true,
+    project,
+    location,
+    googleAuthOptions: {
+      credentials,
+      scopes: ['https://www.googleapis.com/auth/cloud-platform'],
+    },
+  });
+}
+
+async function callVertexAI(subject, description, hintCategory = null, hintTeam = null) {
+  const ai = buildClient();
+  if (!ai) {
+    console.warn('[classifier] Vertex AI client not configured');
+    return null;
+  }
+
+  try {
+    const hint = hintCategory
+      ? `\nOur rule-based classifier is HIGHLY confident this is "${hintCategory}" → "${hintTeam}". Agree unless clearly wrong.`
+      : '';
+
+    const prompt = `You are a support ticket classifier for a B2B software company.
+
+Team responsibilities:
+- Development: bugs, UI errors, crashes, pages not loading/showing, feature requests, anything technical
+- Billing: ONLY actual payment problems (wrong charges, refunds, payment failures, billing disputes)
+- HR: leave requests, payroll/salary issues, HR policies, employee contracts, benefits
+- Support: general how-to, password reset, account access, documentation
+
+Critical rules:
+1. "Invoice not showing in dashboard" = Development (UI/display bug, NOT a Billing issue)
+2. "Charged twice / wrong charge / refund" = Billing (actual money problem)
+3. Any crash, error, blank screen, missing data = Development${hint}
+
+Return valid JSON matching this exact schema:
+{
+  "category": one of [${CATEGORIES.map(c => `"${c}"`).join(', ')}],
+  "priority": one of [${PRIORITIES.map(p => `"${p}"`).join(', ')}],
+  "assignedTeam": one of [${TEAMS.map(t => `"${t}"`).join(', ')}],
+  "draftResponse": "professional 2-3 sentence empathetic response to the client"
+}
+
+Subject: ${subject}
+Description: ${description}`;
+
+    const response = await ai.models.generateContent({
+      model:    'gemini-3.5-flash',
+      contents: prompt,
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: 'object',
+          properties: {
+            category:      { type: 'string', enum: CATEGORIES },
+            priority:      { type: 'string', enum: PRIORITIES },
+            assignedTeam:  { type: 'string', enum: TEAMS },
+            draftResponse: { type: 'string' },
+          },
+          required: ['category', 'priority', 'assignedTeam', 'draftResponse'],
+        },
+        temperature: 0.1,
+      },
+    });
+
+    const text   = response.text;
+    const parsed = JSON.parse(text);
+
+    console.log(`[classifier] Vertex AI → ${parsed.category}/${parsed.assignedTeam} pri=${parsed.priority}`);
+
+    return {
+      category:      CATEGORIES.includes(parsed.category)     ? parsed.category     : 'Other',
+      assignedTeam:  TEAMS.includes(parsed.assignedTeam)       ? parsed.assignedTeam : 'Support',
+      priority:      PRIORITIES.includes(parsed.priority)      ? parsed.priority     : 'Medium',
+      draftResponse: parsed.draftResponse || '',
+    };
+  } catch (err) {
+    console.error('[classifier] Vertex AI error:', err.message);
+    return null;
+  }
+}
+
+// ─── Fallback Draft ───────────────────────────────────────────────────────────
+
+function fallbackDraft(category, subject) {
+  const drafts = {
+    Billing:           `Thank you for reaching out about a billing concern. Our billing team will review your account and respond within 1–2 business days.`,
+    Bug:               `Thank you for reporting this issue with "${subject}". Our development team has been notified and will investigate promptly.`,
+    'Feature Request': `Thank you for your suggestion regarding "${subject}". We've logged it for our product team to evaluate.`,
+    HR:                `Thank you for contacting HR about "${subject}". Our HR team will respond within 1 business day.`,
+    Other:             `Thank you for contacting support. A team member will review "${subject}" and respond within 24–48 hours.`,
+  };
+  return drafts[category] || drafts.Other;
+}
+
+// ─── Main Entry Point ─────────────────────────────────────────────────────────
+
+export async function classifyTicket(subject, description, existingTickets = []) {
+
+  // Step 2: Cache check
+  const cached = findNearDuplicate(subject, description, existingTickets);
+  if (cached) {
+    return {
+      category:      cached.category,
+      assignedTeam:  cached.assignedTeams?.[0] || cached.assignedTeam || 'Support',
+      assignedTeams: cached.assignedTeams || [cached.assignedTeam || 'Support'],
+      priority:      cached.priority,
+      draftResponse: cached.draftResponse || fallbackDraft(cached.category, subject),
+      source:        'cache',
+    };
+  }
+
+  // Step 1: Custom classifier
+  const custom = customClassify(subject, description);
+  const needsFullClassification = custom.confidence < HIGH_CONFIDENCE_THRESHOLD;
+
+  console.log(needsFullClassification
+    ? `[classifier] Low confidence (${custom.confidence.toFixed(2)}) — Vertex AI: full classification`
+    : `[classifier] High confidence (${custom.confidence.toFixed(2)}) — Vertex AI: draft only`
+  );
+
+  // Step 3: Call Vertex AI
+  const aiResult = await callVertexAI(
+    subject, description,
+    needsFullClassification ? null : custom.category,
+    needsFullClassification ? null : custom.team,
+  );
+
+  if (aiResult) {
+    if (needsFullClassification) {
+      return {
+        category:      aiResult.category,
+        assignedTeam:  aiResult.assignedTeam,
+        assignedTeams: [aiResult.assignedTeam],
+        priority:      aiResult.priority,
+        draftResponse: aiResult.draftResponse,
+        source:        'vertex-ai',
+      };
+    }
+    return {
+      category:      custom.category,
+      assignedTeam:  custom.team,
+      assignedTeams: [custom.team],
+      priority:      custom.priority,
+      draftResponse: aiResult.draftResponse,
+      source:        'custom+vertex-draft',
+    };
+  }
+
+  // Step 4: Fallback
+  console.warn('[classifier] Vertex AI unavailable — custom classification + fallback draft');
+  return {
+    category:      custom.category,
+    assignedTeam:  custom.team,
+    assignedTeams: [custom.team],
+    priority:      custom.priority,
+    draftResponse: fallbackDraft(custom.category, subject),
+    source:        'custom-fallback',
+  };
+}
+</file>
+
 <file path="README.md">
 # HelpDesk — AI-Powered Support Ticket System
 
@@ -4054,45 +4054,6 @@ const nextConfig = {
 module.exports = nextConfig;
 </file>
 
-<file path="package.json">
-{
-  "name": "helpdesk",
-  "version": "1.0.0",
-  "description": "AI-powered Support Helpdesk built with Next.js",
-  "main": "index.js",
-  "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "db:generate": "prisma generate",
-    "db:migrate": "prisma migrate dev",
-    "db:seed": "node prisma/seed.js",
-    "db:studio": "prisma studio"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "dependencies": {
-    "@google/genai": "^1.3.0",
-    "@prisma/client": "5.22.0",
-    "autoprefixer": "^10.4.0",
-    "bcryptjs": "^2.4.3",
-    "jose": "^5.9.6",
-    "jsonwebtoken": "^9.0.2",
-    "next": "^15.0.0",
-    "next-auth": "4.24.11",
-    "nodemailer": "6.9.16",
-    "postcss": "^8.4.0",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "tailwindcss": "^3.4.0"
-  },
-  "devDependencies": {
-    "prisma": "5.22.0"
-  }
-}
-</file>
-
 <file path="app/login/page.jsx">
 'use client';
 
@@ -4252,515 +4213,6 @@ export default function LoginPage() {
           </Link>
         </p>
       </div>
-    </div>
-  );
-}
-</file>
-
-<file path="app/portal/tickets/page.jsx">
-'use client';
-
-/**
- * /portal/tickets?email=xxx
- * Full-featured ticket dashboard for email-identified clients.
- * Identical functionality to the Google-auth dashboard — submit, follow-up, view all tickets.
- */
-
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { useSearchParams, useRouter } from 'next/navigation';
-import Link from 'next/link';
-import LoadingSpinner from '../../components/LoadingSpinner';
-
-const MAX_SUBJECT     = 150;
-const MAX_DESCRIPTION = 2000;
-const MAX_FILE_MB     = 5;
-const MAX_FILES       = 3;
-const ACCEPTED_TYPES  = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-
-const STATUS_COLORS = {
-  'Open':        'bg-blue-100 text-blue-700',
-  'In Progress': 'bg-yellow-100 text-yellow-700',
-  'Resolved':    'bg-green-100 text-green-700',
-};
-
-const PRIORITY_COLORS = {
-  'Low':      'bg-gray-100 text-gray-600',
-  'Medium':   'bg-blue-50 text-blue-600',
-  'High':     'bg-orange-100 text-orange-700',
-  'Critical': 'bg-red-100 text-red-700',
-};
-
-function formatDate(d) {
-  return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-}
-
-function fileToDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload  = () => resolve(reader.result);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
-
-// ─── Ticket submission form ───────────────────────────────────────────────────
-function TicketForm({ clientEmail, onSuccess, parentTicket = null, onCancel }) {
-  const [subject,     setSubject]     = useState(parentTicket ? `Re: ${parentTicket.subject}` : '');
-  const [description, setDescription] = useState('');
-  const [attachments, setAttachments] = useState([]);
-  const [phase,       setPhase]       = useState('idle');
-  const [error,       setError]       = useState('');
-  const [dupInfo,     setDupInfo]     = useState(null);
-  const [preClass,    setPreClass]    = useState(null);
-  const fileRef   = useRef(null);
-  const isLoading = phase === 'checking' || phase === 'creating';
-
-  const handleFiles = async (files) => {
-    setError('');
-    const incoming = Array.from(files);
-    if (attachments.length + incoming.length > MAX_FILES) { setError(`Maximum ${MAX_FILES} images allowed.`); return; }
-    const processed = [];
-    for (const file of incoming) {
-      if (!ACCEPTED_TYPES.includes(file.type)) { setError(`"${file.name}" must be JPEG, PNG, GIF or WebP.`); return; }
-      if (file.size > MAX_FILE_MB * 1024 * 1024) { setError(`"${file.name}" exceeds ${MAX_FILE_MB} MB.`); return; }
-      processed.push({ fileName: file.name, mimeType: file.type, dataUrl: await fileToDataUrl(file), sizeBytes: file.size });
-    }
-    setAttachments(p => [...p, ...processed]);
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setError('');
-    if (parentTicket) { await createTicket({}); return; }
-    setPhase('checking');
-    try {
-      const res  = await fetch('/api/portal/tickets/check-duplicate', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ subject: subject.trim(), description: description.trim() }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Check failed');
-      if (data.isDuplicate && data.existingTicket) {
-        setDupInfo({ existingTicket: data.existingTicket, score: data.score });
-        setPreClass(data.classification);
-        setPhase('duplicate');
-        return;
-      }
-      await createTicket({ preClassification: data.classification });
-    } catch (err) { setError(err.message); setPhase('idle'); }
-  };
-
-  const createTicket = async ({ forceCreate = false, duplicateOfId = null, similarityScore = null, preClassification = null } = {}) => {
-    setPhase('creating');
-    setError('');
-    try {
-      const res  = await fetch('/api/portal/tickets', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          subject: subject.trim(), description: description.trim(), clientEmail,
-          parentTicketId: parentTicket?.id || null,
-          forceCreate, duplicateOfId, similarityScore, preClassification,
-          attachments: attachments.map(({ fileName, mimeType, dataUrl, sizeBytes }) => ({ fileName, mimeType, dataUrl, sizeBytes })),
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Submission failed');
-      onSuccess(data.ticket);
-    } catch (err) { setError(err.message); setPhase('idle'); }
-  };
-
-  return (
-    <form onSubmit={handleSubmit} noValidate>
-      {error && (
-        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 flex items-start gap-2">
-          <svg className="w-4 h-4 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd"/>
-          </svg>
-          {error}
-        </div>
-      )}
-
-      {phase === 'duplicate' && dupInfo && (
-        <div className="mb-4 p-4 bg-orange-50 border border-orange-200 rounded-lg text-sm">
-          <p className="font-semibold text-orange-900 mb-1">⚠ Similar ticket already exists ({dupInfo.score}% match)</p>
-          <p className="text-orange-700 font-medium mb-1">{dupInfo.existingTicket.subject}</p>
-          <p className="text-orange-600 text-xs mb-3">Status: {dupInfo.existingTicket.status}</p>
-          <div className="flex gap-2">
-            <button type="button" onClick={() => setPhase('idle')} className="btn-secondary text-xs px-3 py-1.5">Go Back</button>
-            <button type="button" disabled={isLoading}
-              onClick={() => createTicket({ forceCreate: true, duplicateOfId: dupInfo.existingTicket.id, similarityScore: dupInfo.score, preClassification: preClass })}
-              className="btn-primary text-xs px-3 py-1.5">
-              {isLoading ? <LoadingSpinner size="sm" /> : 'Submit Anyway'}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {phase !== 'duplicate' && (
-        <>
-          <div className="mb-4">
-            <label className="block text-sm font-medium text-gray-700 mb-1">Subject <span className="text-red-500">*</span></label>
-            <input type="text" value={subject} onChange={e => setSubject(e.target.value)}
-              maxLength={MAX_SUBJECT} placeholder="Brief summary of your issue"
-              className="input-field" required disabled={isLoading} />
-            <p className="text-xs text-gray-400 mt-1 text-right">{subject.length}/{MAX_SUBJECT}</p>
-          </div>
-          <div className="mb-4">
-            <label className="block text-sm font-medium text-gray-700 mb-1">Description <span className="text-red-500">*</span></label>
-            <textarea value={description} onChange={e => setDescription(e.target.value)}
-              maxLength={MAX_DESCRIPTION} rows={5}
-              placeholder="Describe your issue in detail — include any error messages, steps to reproduce, etc."
-              className="input-field resize-none" required disabled={isLoading} />
-            <p className="text-xs text-gray-400 mt-1 text-right">{description.length}/{MAX_DESCRIPTION}</p>
-          </div>
-          <div className="mb-5">
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Screenshots / Images <span className="text-gray-400 text-xs font-normal">(optional — up to {MAX_FILES}, {MAX_FILE_MB} MB each)</span>
-            </label>
-            {attachments.length < MAX_FILES && (
-              <div onClick={() => fileRef.current?.click()} onDragOver={e => e.preventDefault()}
-                onDrop={e => { e.preventDefault(); handleFiles(e.dataTransfer.files); }}
-                className="border-2 border-dashed border-gray-200 rounded-lg p-5 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-colors">
-                <svg className="w-7 h-7 text-gray-300 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
-                </svg>
-                <p className="text-sm text-gray-500">Click or drag images here</p>
-                <p className="text-xs text-gray-400 mt-0.5">JPEG, PNG, GIF, WebP</p>
-                <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={e => handleFiles(e.target.files)} />
-              </div>
-            )}
-            {attachments.length > 0 && (
-              <div className="flex flex-wrap gap-3 mt-3">
-                {attachments.map((att, idx) => (
-                  <div key={idx} className="relative group">
-                    <img src={att.dataUrl} alt={att.fileName} className="w-20 h-20 object-cover rounded-lg border border-gray-200" />
-                    <button type="button" onClick={() => setAttachments(p => p.filter((_, i) => i !== idx))}
-                      className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 text-white rounded-full text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">✕</button>
-                    <p className="text-xs text-gray-400 mt-1 max-w-[80px] truncate">{att.fileName}</p>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-          <div className="flex gap-3">
-            <button type="submit" disabled={isLoading || !subject.trim() || !description.trim()} className="btn-primary flex-1">
-              {phase === 'checking' ? <><LoadingSpinner size="sm" /> Checking…</> :
-               phase === 'creating' ? <><LoadingSpinner size="sm" /> Submitting…</> :
-               parentTicket ? '↩ Submit Follow-up' : 'Submit Ticket'}
-            </button>
-            {onCancel && <button type="button" onClick={onCancel} className="btn-secondary">Cancel</button>}
-          </div>
-        </>
-      )}
-    </form>
-  );
-}
-
-// ─── Ticket card ──────────────────────────────────────────────────────────────
-function TicketCard({ ticket, clientEmail, onFollowUpSuccess }) {
-  const [expanded,       setExpanded]       = useState(false);
-  const [activeAction,   setActiveAction]   = useState(null); // 'followup' | 'details' | null
-  const [messageText,    setMessageText]    = useState('');
-  const [submitting,     setSubmitting]     = useState(false);
-  const [msg,            setMsg]            = useState('');
-
-  const handleAction = async (endpoint, successText) => {
-    if (!messageText.trim()) return;
-    setSubmitting(true);
-    setMsg('');
-    try {
-      const res  = await fetch(`/api/portal/tickets/${ticket.id}/${endpoint}`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clientEmail, message: messageText.trim(), details: messageText.trim() }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to submit');
-      setMsg(`✓ ${successText}`);
-      setMessageText('');
-      setTimeout(() => { setMsg(''); setActiveAction(null); }, 2500);
-    } catch (e) {
-      setMsg(`Error: ${e.message}`);
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const closeAction = () => { setActiveAction(null); setMessageText(''); setMsg(''); };
-
-  return (
-    <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-      <div className="p-5">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap mb-1">
-              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[ticket.status] || 'bg-gray-100 text-gray-600'}`}>
-                {ticket.status}
-              </span>
-              {ticket.priority && (
-                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${PRIORITY_COLORS[ticket.priority] || 'bg-gray-100 text-gray-600'}`}>
-                  {ticket.priority}
-                </span>
-              )}
-              {ticket.category && <span className="text-xs text-gray-400">{ticket.category}</span>}
-            </div>
-            <h3 className="font-semibold text-gray-900 text-sm leading-snug">{ticket.subject}</h3>
-            <p className="text-xs text-gray-400 mt-1">Submitted {formatDate(ticket.createdAt)}</p>
-          </div>
-          <button onClick={() => setExpanded(p => !p)}
-            className="text-gray-400 hover:text-gray-600 transition-colors flex-shrink-0 mt-0.5" aria-label={expanded ? 'Collapse' : 'Expand'}>
-            <svg className={`w-5 h-5 transition-transform ${expanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7"/>
-            </svg>
-          </button>
-        </div>
-      </div>
-
-      {expanded && (
-        <div className="border-t border-gray-100 px-5 pb-5 pt-4 space-y-4">
-          <div>
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Description</p>
-            <p className="text-sm text-gray-700 whitespace-pre-wrap">{ticket.description}</p>
-          </div>
-          {ticket.draftResponse && (
-            <div className="bg-blue-50 border border-blue-100 rounded-lg p-4">
-              <p className="text-xs font-medium text-blue-700 uppercase tracking-wide mb-1.5">✨ AI Suggested Response</p>
-              <p className="text-sm text-blue-800 whitespace-pre-wrap">{ticket.draftResponse}</p>
-            </div>
-          )}
-
-          {/* Messages from the support team */}
-          {ticket.activities?.length > 0 && (
-            <div className="space-y-2">
-              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Messages from Support Team</p>
-              {ticket.activities.map(act => (
-                <div key={act.id} className="bg-amber-50 border border-amber-200 rounded-lg p-4">
-                  <div className="flex items-center justify-between gap-2 mb-2">
-                    <div className="flex items-center gap-1.5">
-                      <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-200 text-amber-800 text-xs font-bold">
-                        {act.userName ? act.userName.charAt(0).toUpperCase() : '?'}
-                      </span>
-                      <span className="text-xs font-semibold text-amber-800">
-                        {act.userName}{act.userTeam ? ` · ${act.userTeam}` : ''}
-                      </span>
-                    </div>
-                    <time className="text-xs text-amber-600">
-                      {new Date(act.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                    </time>
-                  </div>
-                  <p className="text-sm text-amber-900 leading-snug whitespace-pre-wrap">{act.newValue}</p>
-                </div>
-              ))}
-            </div>
-          )}
-          {ticket.attachments?.length > 0 && (
-            <div>
-              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Attachments</p>
-              <div className="flex flex-wrap gap-2">
-                {ticket.attachments.map(att => (
-                  <div key={att.id} className="flex items-center gap-1.5 px-2.5 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-xs text-gray-600">
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/>
-                    </svg>
-                    {att.fileName}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {ticket.status !== 'Resolved' && (
-            <div className="border-t border-gray-100 pt-4">
-              {activeAction ? (
-                <div>
-                  <p className="text-sm font-semibold text-gray-700 mb-2">
-                    {activeAction === 'follow-up' ? 'Add a Follow-up' : 'Provide Additional Details'}
-                  </p>
-                  {msg && (
-                    <p className={`text-sm mb-2 ${msg.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>{msg}</p>
-                  )}
-                  <textarea value={messageText} onChange={e => setMessageText(e.target.value)}
-                    rows={4}
-                    placeholder={activeAction === 'follow-up'
-                      ? 'Add more context or an update to this ticket…'
-                      : 'Share the additional details our team requested…'}
-                    className="input-field resize-none text-sm mb-3" disabled={submitting} />
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => handleAction(activeAction, activeAction === 'follow-up' ? 'Follow-up added.' : 'Details submitted.')}
-                      disabled={submitting || !messageText.trim()}
-                      className="btn-primary text-sm">
-                      {submitting ? <><LoadingSpinner size="sm" /> Submitting…</> : 'Submit'}
-                    </button>
-                    <button onClick={closeAction} className="btn-secondary text-sm">Cancel</button>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex flex-wrap gap-3">
-                  <button onClick={() => setActiveAction('follow-up')}
-                    className="text-sm text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/>
-                    </svg>
-                    Add follow-up
-                  </button>
-                  <button onClick={() => setActiveAction('provide-details')}
-                    className="text-sm text-amber-600 hover:text-amber-700 font-medium flex items-center gap-1">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
-                    </svg>
-                    Provide details
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── Main page ────────────────────────────────────────────────────────────────
-export default function EmailTicketsPage() {
-  const searchParams = useSearchParams();
-  const router       = useRouter();
-  const email        = searchParams.get('email') || '';
-
-  const [tickets,      setTickets]      = useState([]);
-  const [loading,      setLoading]      = useState(true);
-  const [error,        setError]        = useState('');
-  const [showForm,     setShowForm]     = useState(false);
-  const [statusFilter, setStatusFilter] = useState('All');
-
-  useEffect(() => {
-    if (!email) { router.replace('/portal'); return; }
-  }, [email, router]);
-
-  const fetchTickets = useCallback(async () => {
-    if (!email) return;
-    setLoading(true);
-    setError('');
-    try {
-      const res  = await fetch(`/api/portal/tickets?email=${encodeURIComponent(email)}`);
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      setTickets(data.tickets || []);
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setLoading(false);
-    }
-  }, [email]);
-
-  useEffect(() => { fetchTickets(); }, [fetchTickets]);
-
-  const handleNewTicket   = (ticket) => { setTickets(p => [ticket, ...p]); setShowForm(false); };
-
-  const filtered = statusFilter === 'All' ? tickets : tickets.filter(t => t.status === statusFilter);
-  const counts   = {
-    All:           tickets.length,
-    Open:          tickets.filter(t => t.status === 'Open').length,
-    'In Progress': tickets.filter(t => t.status === 'In Progress').length,
-    Resolved:      tickets.filter(t => t.status === 'Resolved').length,
-  };
-
-  if (!email) return null;
-
-  return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Navbar */}
-      <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
-        <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between gap-4">
-          <Link href="/portal" className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
-              <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                  d="M18.364 5.636l-3.536 3.536m0 5.656l3.536 3.536M9.172 9.172L5.636 5.636m3.536 9.192l-3.536 3.536M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-5 0a4 4 0 11-8 0 4 4 0 018 0z"/>
-              </svg>
-            </div>
-            <span className="font-bold text-gray-900 text-sm">HelpDesk</span>
-          </Link>
-          <div className="flex items-center gap-3">
-            <p className="text-xs text-gray-500 hidden sm:block truncate max-w-[200px]">{email}</p>
-            <Link href="/portal"
-              className="text-sm text-blue-600 hover:text-blue-700 font-medium px-3 py-1.5 rounded-lg hover:bg-blue-50 transition-colors">
-              Sign in with Google
-            </Link>
-            <Link href="/portal"
-              className="text-sm text-gray-500 hover:text-red-600 transition-colors px-3 py-1.5 rounded-lg hover:bg-red-50 font-medium">
-              Sign out
-            </Link>
-          </div>
-        </div>
-      </header>
-
-      <main className="max-w-4xl mx-auto px-4 py-8">
-        {/* Header row */}
-        <div className="flex items-center justify-between mb-6 gap-4 flex-wrap">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">My Tickets</h1>
-            <p className="text-sm text-gray-500 mt-0.5">
-              Showing tickets for <span className="font-medium text-gray-700">{email}</span>
-            </p>
-          </div>
-          <button onClick={() => setShowForm(p => !p)} className="btn-primary flex items-center gap-2">
-            {showForm ? (
-              <><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></svg>Cancel</>
-            ) : (
-              <><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4"/></svg>New Ticket</>
-            )}
-          </button>
-        </div>
-
-        {/* New ticket form */}
-        {showForm && (
-          <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-6 mb-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">Submit a New Ticket</h2>
-            <TicketForm clientEmail={email} onSuccess={handleNewTicket} onCancel={() => setShowForm(false)} />
-          </div>
-        )}
-
-        {/* Stats strip */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-          {Object.entries(counts).map(([label, count]) => (
-            <button key={label} onClick={() => setStatusFilter(label)}
-              className={`p-3 rounded-xl border text-left transition-colors ${statusFilter === label ? 'bg-blue-50 border-blue-200' : 'bg-white border-gray-200 hover:bg-gray-50'}`}>
-              <p className={`text-2xl font-bold ${statusFilter === label ? 'text-blue-700' : 'text-gray-900'}`}>{count}</p>
-              <p className={`text-xs mt-0.5 ${statusFilter === label ? 'text-blue-600' : 'text-gray-500'}`}>{label}</p>
-            </button>
-          ))}
-        </div>
-
-        {/* Ticket list */}
-        {loading ? (
-          <div className="flex items-center justify-center py-20"><LoadingSpinner size="lg" /></div>
-        ) : error ? (
-          <div className="bg-red-50 border border-red-200 rounded-xl p-6 text-center">
-            <p className="text-red-700 font-medium">{error}</p>
-            <button onClick={fetchTickets} className="mt-3 text-sm text-red-600 hover:text-red-700 underline">Try again</button>
-          </div>
-        ) : filtered.length === 0 ? (
-          <div className="bg-white border border-gray-200 rounded-xl p-12 text-center">
-            <svg className="w-12 h-12 text-gray-200 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-            </svg>
-            {statusFilter === 'All' ? (
-              <>
-                <p className="text-gray-500 font-medium">No tickets yet</p>
-                <p className="text-gray-400 text-sm mt-1">Click "New Ticket" above to get support.</p>
-              </>
-            ) : (
-              <p className="text-gray-500 font-medium">No {statusFilter.toLowerCase()} tickets</p>
-            )}
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {filtered.map(ticket => (
-              <TicketCard key={ticket.id} ticket={ticket} clientEmail={email} />
-            ))}
-          </div>
-        )}
-      </main>
     </div>
   );
 }
@@ -5261,294 +4713,6 @@ main()
   .finally(async () => {
     await prisma.$disconnect();
   });
-</file>
-
-<file path="app/admin/page.jsx">
-'use client';
-
-/**
- * Admin Dashboard — /admin
- * Protected (Admin only). Full access to all tickets with filtering and reassignment.
- */
-
-import { useState, useEffect, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
-import Navbar from '../components/Navbar';
-import TicketTable from '../components/TicketTable';
-import StatsCards from '../components/StatsCards';
-import FilterBar from '../components/FilterBar';
-import LoadingSpinner from '../components/LoadingSpinner';
-
-export default function AdminPage() {
-  const router = useRouter();
-  const [user, setUser] = useState(null);
-  const [tickets, setTickets] = useState([]);
-  const [filteredTickets, setFilteredTickets] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [filters, setFilters] = useState({
-    status: '',
-    category: '',
-    priority: '',
-    team: '',
-  });
-
-  // AI status
-  const [aiStatus, setAiStatus] = useState(null);
-  const [aiChecking, setAiChecking] = useState(false);
-
-  // Auth check
-  useEffect(() => {
-    fetch('/api/team-auth/me')
-      .then((r) => (r.ok ? r.json() : Promise.reject()))
-      .then((data) => {
-        if (!data.user || data.user.role !== 'Admin') {
-          router.push('/login');
-          return;
-        }
-        setUser(data.user);
-      })
-      .catch(() => router.push('/login'));
-  }, [router]);
-
-  // Fetch ALL tickets
-  const fetchTickets = useCallback(async () => {
-    if (!user) return;
-    setLoading(true);
-    setError('');
-    try {
-      const res = await fetch('/api/tickets');
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to load tickets');
-      setTickets(data.tickets);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  }, [user]);
-
-  const checkAiStatus = async () => {
-    setAiChecking(true);
-    try {
-      const res  = await fetch('/api/admin/ai-status');
-      const data = await res.json();
-      setAiStatus(data);
-    } catch {
-      setAiStatus({ status: 'error', message: 'Could not reach the status endpoint.' });
-    } finally {
-      setAiChecking(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchTickets();
-  }, [fetchTickets]);
-
-  // Client-side filtering
-  useEffect(() => {
-    let result = [...tickets];
-    if (filters.status) result = result.filter((t) => t.status === filters.status);
-    if (filters.category) result = result.filter((t) => t.category === filters.category);
-    if (filters.priority) result = result.filter((t) => t.priority === filters.priority);
-    if (filters.team) result = result.filter((t) =>
-      (t.assignedTeams ?? (t.assignedTeam ? [t.assignedTeam] : [])).includes(filters.team)
-    );
-    setFilteredTickets(result);
-  }, [tickets, filters]);
-
-  const handleFilterChange = (key, value) => {
-    setFilters((prev) => ({ ...prev, [key]: value }));
-  };
-
-  // Team distribution breakdown
-  const teamBreakdown = () => {
-    const teams = ['Development', 'Billing', 'HR', 'Support'];
-    return teams.map((team) => ({
-      team,
-      count: tickets.filter((t) =>
-        (t.assignedTeams || (t.assignedTeam ? [t.assignedTeam] : [])).includes(team)
-      ).length,
-    }));
-  };
-
-  if (!user) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <LoadingSpinner size="lg" />
-      </div>
-    );
-  }
-
-  return (
-    <div className="min-h-screen bg-gray-50">
-      <Navbar />
-
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Page Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
-          <div>
-            <div className="flex items-center gap-3 mb-1">
-              <h1 className="text-2xl font-bold text-gray-900">Admin Dashboard</h1>
-              <span className="badge bg-purple-100 text-purple-700">Admin</span>
-            </div>
-            <p className="text-gray-500 text-sm">
-              Welcome, <span className="font-medium text-gray-700">{user.name}</span>. Full access to all tickets across all teams.
-            </p>
-          </div>
-          <button
-            onClick={fetchTickets}
-            disabled={loading}
-            className="btn-secondary self-start sm:self-auto"
-          >
-            {loading ? <LoadingSpinner size="sm" /> : (
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-              </svg>
-            )}
-            Refresh
-          </button>
-        </div>
-
-        {error && (
-          <div className="alert-error mb-6 flex items-center gap-2">
-            <svg className="w-4 h-4 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-            </svg>
-            {error}
-            <button onClick={fetchTickets} className="ml-auto text-xs underline">Retry</button>
-          </div>
-        )}
-
-        {loading && tickets.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-24 gap-3">
-            <LoadingSpinner size="lg" />
-            <p className="text-gray-500 text-sm">Loading all tickets…</p>
-          </div>
-        ) : (
-          <>
-            {/* AI Status */}
-            <div className="mb-6 p-4 bg-white border border-gray-200 rounded-xl flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${
-                  !aiStatus            ? 'bg-gray-300' :
-                  aiStatus.status === 'connected' ? 'bg-green-500 animate-pulse' :
-                  'bg-red-400'
-                }`} />
-                <div>
-                  <p className="text-sm font-semibold text-gray-800">
-                    Vertex AI (Gemini)
-                    {aiStatus && (
-                      <span className={`ml-2 text-xs font-medium px-2 py-0.5 rounded-full ${
-                        aiStatus.status === 'connected'
-                          ? 'bg-green-100 text-green-700'
-                          : 'bg-red-100 text-red-700'
-                      }`}>
-                        {aiStatus.status === 'connected' ? '✓ Connected' : aiStatus.status.replace(/_/g, ' ')}
-                      </span>
-                    )}
-                  </p>
-                  {aiStatus && (
-                    <p className="text-xs text-gray-500 mt-0.5">
-                      {aiStatus.status === 'connected'
-                        ? `${aiStatus.model} · ${aiStatus.location} · ${aiStatus.latencyMs}ms`
-                        : aiStatus.message?.substring(0, 100)}
-                    </p>
-                  )}
-                  {!aiStatus && <p className="text-xs text-gray-400">Click to check AI classification status</p>}
-                </div>
-              </div>
-              <button onClick={checkAiStatus} disabled={aiChecking}
-                className="btn-secondary text-xs px-3 py-1.5 flex items-center gap-1.5">
-                {aiChecking ? (
-                  <><LoadingSpinner size="sm" /> Checking…</>
-                ) : (
-                  <>
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                        d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                    </svg>
-                    Check Status
-                  </>
-                )}
-              </button>
-            </div>
-
-            {/* Stats */}
-            <div className="mb-6">
-              <StatsCards tickets={tickets} />
-            </div>
-
-            {/* Team Breakdown */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
-              {teamBreakdown().map(({ team, count }) => {
-                const colorMap = {
-                  Development: 'border-blue-200 bg-blue-50',
-                  Billing: 'border-emerald-200 bg-emerald-50',
-                  HR: 'border-pink-200 bg-pink-50',
-                  Support: 'border-orange-200 bg-orange-50',
-                };
-                const textMap = {
-                  Development: 'text-blue-700',
-                  Billing: 'text-emerald-700',
-                  HR: 'text-pink-700',
-                  Support: 'text-orange-700',
-                };
-                return (
-                  <button
-                    key={team}
-                    onClick={() => handleFilterChange('team', filters.team === team ? '' : team)}
-                    className={`p-4 rounded-xl border-2 text-left transition-all ${
-                      filters.team === team
-                        ? colorMap[team] + ' ring-2 ring-offset-1 ring-current'
-                        : 'border-gray-200 bg-white hover:border-gray-300'
-                    }`}
-                  >
-                    <p className={`text-2xl font-bold ${filters.team === team ? textMap[team] : 'text-gray-900'}`}>
-                      {count}
-                    </p>
-                    <p className="text-xs text-gray-500 mt-0.5">{team} Team</p>
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Filters + Table */}
-            <div className="card">
-              <div className="flex flex-col gap-4 mb-6">
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                  <h2 className="text-lg font-semibold text-gray-900">
-                    All Tickets
-                    <span className="ml-2 text-sm font-normal text-gray-500">
-                      ({filteredTickets.length}{filteredTickets.length !== tickets.length ? ` of ${tickets.length}` : ''})
-                    </span>
-                  </h2>
-                </div>
-                <FilterBar
-                  filters={filters}
-                  onChange={handleFilterChange}
-                  isAdmin={true}
-                />
-              </div>
-
-              <TicketTable
-                tickets={filteredTickets}
-                isAdmin={true}
-                userRole={user.role}
-                userTeam={user.team}
-                hasActiveFilters={!!(filters.status || filters.category || filters.priority || filters.team)}
-                onClearFilters={() => setFilters({ status: '', category: '', priority: '', team: '' })}
-                onTicketDeleted={(deletedId) => {
-                  setTickets((prev) => prev.filter((t) => t.id !== deletedId));
-                }}
-              />
-            </div>
-          </>
-        )}
-      </main>
-    </div>
-  );
-}
 </file>
 
 <file path="app/api/tickets/route.js">
@@ -6941,6 +6105,530 @@ export default function PortalDashboard() {
 }
 </file>
 
+<file path="app/portal/tickets/page.jsx">
+'use client';
+
+/**
+ * /portal/tickets?email=xxx
+ * Full-featured ticket dashboard for email-identified clients.
+ * Identical functionality to the Google-auth dashboard — submit, follow-up, view all tickets.
+ */
+
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
+import Link from 'next/link';
+import LoadingSpinner from '../../components/LoadingSpinner';
+
+const MAX_SUBJECT     = 150;
+const MAX_DESCRIPTION = 2000;
+const MAX_FILE_MB     = 5;
+const MAX_FILES       = 3;
+const ACCEPTED_TYPES  = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+
+const STATUS_COLORS = {
+  'Open':        'bg-blue-100 text-blue-700',
+  'In Progress': 'bg-yellow-100 text-yellow-700',
+  'Resolved':    'bg-green-100 text-green-700',
+};
+
+const PRIORITY_COLORS = {
+  'Low':      'bg-gray-100 text-gray-600',
+  'Medium':   'bg-blue-50 text-blue-600',
+  'High':     'bg-orange-100 text-orange-700',
+  'Critical': 'bg-red-100 text-red-700',
+};
+
+function formatDate(d) {
+  return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload  = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+// ─── Ticket submission form ───────────────────────────────────────────────────
+function TicketForm({ clientEmail, onSuccess, parentTicket = null, onCancel }) {
+  const [subject,     setSubject]     = useState(parentTicket ? `Re: ${parentTicket.subject}` : '');
+  const [description, setDescription] = useState('');
+  const [attachments, setAttachments] = useState([]);
+  const [phase,       setPhase]       = useState('idle');
+  const [error,       setError]       = useState('');
+  const [dupInfo,     setDupInfo]     = useState(null);
+  const [preClass,    setPreClass]    = useState(null);
+  const fileRef   = useRef(null);
+  const isLoading = phase === 'checking' || phase === 'creating';
+
+  const handleFiles = async (files) => {
+    setError('');
+    const incoming = Array.from(files);
+    if (attachments.length + incoming.length > MAX_FILES) { setError(`Maximum ${MAX_FILES} images allowed.`); return; }
+    const processed = [];
+    for (const file of incoming) {
+      if (!ACCEPTED_TYPES.includes(file.type)) { setError(`"${file.name}" must be JPEG, PNG, GIF or WebP.`); return; }
+      if (file.size > MAX_FILE_MB * 1024 * 1024) { setError(`"${file.name}" exceeds ${MAX_FILE_MB} MB.`); return; }
+      processed.push({ fileName: file.name, mimeType: file.type, dataUrl: await fileToDataUrl(file), sizeBytes: file.size });
+    }
+    setAttachments(p => [...p, ...processed]);
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+    if (parentTicket) { await createTicket({}); return; }
+    setPhase('checking');
+    try {
+      const res  = await fetch('/api/portal/tickets/check-duplicate', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subject: subject.trim(), description: description.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Check failed');
+      if (data.isDuplicate && data.existingTicket) {
+        setDupInfo({ existingTicket: data.existingTicket, score: data.score });
+        setPreClass(data.classification);
+        setPhase('duplicate');
+        return;
+      }
+      await createTicket({ preClassification: data.classification });
+    } catch (err) { setError(err.message); setPhase('idle'); }
+  };
+
+  const createTicket = async ({ forceCreate = false, duplicateOfId = null, similarityScore = null, preClassification = null } = {}) => {
+    setPhase('creating');
+    setError('');
+    try {
+      const res  = await fetch('/api/portal/tickets', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          subject: subject.trim(), description: description.trim(), clientEmail,
+          parentTicketId: parentTicket?.id || null,
+          forceCreate, duplicateOfId, similarityScore, preClassification,
+          attachments: attachments.map(({ fileName, mimeType, dataUrl, sizeBytes }) => ({ fileName, mimeType, dataUrl, sizeBytes })),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Submission failed');
+      onSuccess(data.ticket);
+    } catch (err) { setError(err.message); setPhase('idle'); }
+  };
+
+  return (
+    <form onSubmit={handleSubmit} noValidate>
+      {error && (
+        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 flex items-start gap-2">
+          <svg className="w-4 h-4 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd"/>
+          </svg>
+          {error}
+        </div>
+      )}
+
+      {phase === 'duplicate' && dupInfo && (
+        <div className="mb-4 p-4 bg-orange-50 border border-orange-200 rounded-lg text-sm">
+          <p className="font-semibold text-orange-900 mb-1">⚠ Similar ticket already exists ({dupInfo.score}% match)</p>
+          <p className="text-orange-700 font-medium mb-1">{dupInfo.existingTicket.subject}</p>
+          <p className="text-orange-600 text-xs mb-3">Status: {dupInfo.existingTicket.status}</p>
+          <div className="flex gap-2">
+            <button type="button" onClick={() => setPhase('idle')} className="btn-secondary text-xs px-3 py-1.5">Go Back</button>
+            <button type="button" disabled={isLoading}
+              onClick={() => createTicket({ forceCreate: true, duplicateOfId: dupInfo.existingTicket.id, similarityScore: dupInfo.score, preClassification: preClass })}
+              className="btn-primary text-xs px-3 py-1.5">
+              {isLoading ? <LoadingSpinner size="sm" /> : 'Submit Anyway'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {phase !== 'duplicate' && (
+        <>
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Subject <span className="text-red-500">*</span></label>
+            <input type="text" value={subject} onChange={e => setSubject(e.target.value)}
+              maxLength={MAX_SUBJECT} placeholder="Brief summary of your issue"
+              className="input-field" required disabled={isLoading} />
+            <p className="text-xs text-gray-400 mt-1 text-right">{subject.length}/{MAX_SUBJECT}</p>
+          </div>
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Description <span className="text-red-500">*</span></label>
+            <textarea value={description} onChange={e => setDescription(e.target.value)}
+              maxLength={MAX_DESCRIPTION} rows={5}
+              placeholder="Describe your issue in detail — include any error messages, steps to reproduce, etc."
+              className="input-field resize-none" required disabled={isLoading} />
+            <p className="text-xs text-gray-400 mt-1 text-right">{description.length}/{MAX_DESCRIPTION}</p>
+          </div>
+          <div className="mb-5">
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Screenshots / Images <span className="text-gray-400 text-xs font-normal">(optional — up to {MAX_FILES}, {MAX_FILE_MB} MB each)</span>
+            </label>
+            {attachments.length < MAX_FILES && (
+              <div onClick={() => fileRef.current?.click()} onDragOver={e => e.preventDefault()}
+                onDrop={e => { e.preventDefault(); handleFiles(e.dataTransfer.files); }}
+                className="border-2 border-dashed border-gray-200 rounded-lg p-5 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-colors">
+                <svg className="w-7 h-7 text-gray-300 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                </svg>
+                <p className="text-sm text-gray-500">Click or drag images here</p>
+                <p className="text-xs text-gray-400 mt-0.5">JPEG, PNG, GIF, WebP</p>
+                <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={e => handleFiles(e.target.files)} />
+              </div>
+            )}
+            {attachments.length > 0 && (
+              <div className="flex flex-wrap gap-3 mt-3">
+                {attachments.map((att, idx) => (
+                  <div key={idx} className="relative group">
+                    <img src={att.dataUrl} alt={att.fileName} className="w-20 h-20 object-cover rounded-lg border border-gray-200" />
+                    <button type="button" onClick={() => setAttachments(p => p.filter((_, i) => i !== idx))}
+                      className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 text-white rounded-full text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">✕</button>
+                    <p className="text-xs text-gray-400 mt-1 max-w-[80px] truncate">{att.fileName}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="flex gap-3">
+            <button type="submit" disabled={isLoading || !subject.trim() || !description.trim()} className="btn-primary flex-1">
+              {phase === 'checking' ? <><LoadingSpinner size="sm" /> Checking…</> :
+               phase === 'creating' ? <><LoadingSpinner size="sm" /> Submitting…</> :
+               parentTicket ? '↩ Submit Follow-up' : 'Submit Ticket'}
+            </button>
+            {onCancel && <button type="button" onClick={onCancel} className="btn-secondary">Cancel</button>}
+          </div>
+        </>
+      )}
+    </form>
+  );
+}
+
+// ─── Ticket card ──────────────────────────────────────────────────────────────
+function TicketCard({ ticket, clientEmail, onFollowUpSuccess }) {
+  const [expanded,       setExpanded]       = useState(false);
+  const [activeAction,   setActiveAction]   = useState(null); // 'followup' | 'details' | null
+  const [messageText,    setMessageText]    = useState('');
+  const [submitting,     setSubmitting]     = useState(false);
+  const [msg,            setMsg]            = useState('');
+
+  const handleAction = async (endpoint, successText) => {
+    if (!messageText.trim()) return;
+    setSubmitting(true);
+    setMsg('');
+    try {
+      const res  = await fetch(`/api/portal/tickets/${ticket.id}/${endpoint}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientEmail, message: messageText.trim(), details: messageText.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to submit');
+      setMsg(`✓ ${successText}`);
+      setMessageText('');
+      setTimeout(() => { setMsg(''); setActiveAction(null); }, 2500);
+    } catch (e) {
+      setMsg(`Error: ${e.message}`);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const closeAction = () => { setActiveAction(null); setMessageText(''); setMsg(''); };
+
+  return (
+    <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+      <div className="p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap mb-1">
+              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[ticket.status] || 'bg-gray-100 text-gray-600'}`}>
+                {ticket.status}
+              </span>
+              {ticket.priority && (
+                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${PRIORITY_COLORS[ticket.priority] || 'bg-gray-100 text-gray-600'}`}>
+                  {ticket.priority}
+                </span>
+              )}
+              {ticket.category && <span className="text-xs text-gray-400">{ticket.category}</span>}
+            </div>
+            <h3 className="font-semibold text-gray-900 text-sm leading-snug">{ticket.subject}</h3>
+            <p className="text-xs text-gray-400 mt-1">Submitted {formatDate(ticket.createdAt)}</p>
+          </div>
+          <button onClick={() => setExpanded(p => !p)}
+            className="text-gray-400 hover:text-gray-600 transition-colors flex-shrink-0 mt-0.5" aria-label={expanded ? 'Collapse' : 'Expand'}>
+            <svg className={`w-5 h-5 transition-transform ${expanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      {expanded && (
+        <div className="border-t border-gray-100 px-5 pb-5 pt-4 space-y-4">
+          <div>
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Description</p>
+            <p className="text-sm text-gray-700 whitespace-pre-wrap">{ticket.description}</p>
+          </div>
+          {ticket.draftResponse && (
+            <div className="bg-blue-50 border border-blue-100 rounded-lg p-4">
+              <p className="text-xs font-medium text-blue-700 uppercase tracking-wide mb-1.5">✨ AI Suggested Response</p>
+              <p className="text-sm text-blue-800 whitespace-pre-wrap">{ticket.draftResponse}</p>
+            </div>
+          )}
+
+          {/* Messages from the support team */}
+          {ticket.activities?.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Messages from Support Team</p>
+              {ticket.activities.map(act => (
+                <div key={act.id} className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <div className="flex items-center gap-1.5">
+                      <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-200 text-amber-800 text-xs font-bold">
+                        {act.userName ? act.userName.charAt(0).toUpperCase() : '?'}
+                      </span>
+                      <span className="text-xs font-semibold text-amber-800">
+                        {act.userName}{act.userTeam ? ` · ${act.userTeam}` : ''}
+                      </span>
+                    </div>
+                    <time className="text-xs text-amber-600">
+                      {new Date(act.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                    </time>
+                  </div>
+                  <p className="text-sm text-amber-900 leading-snug whitespace-pre-wrap">{act.newValue}</p>
+                </div>
+              ))}
+            </div>
+          )}
+          {ticket.attachments?.length > 0 && (
+            <div>
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Attachments</p>
+              <div className="flex flex-wrap gap-2">
+                {ticket.attachments.map(att => (
+                  <div key={att.id} className="flex items-center gap-1.5 px-2.5 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-xs text-gray-600">
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/>
+                    </svg>
+                    {att.fileName}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {ticket.status !== 'Resolved' && (
+            <div className="border-t border-gray-100 pt-4">
+              {activeAction ? (
+                <div>
+                  <p className="text-sm font-semibold text-gray-700 mb-2">
+                    {activeAction === 'follow-up' ? 'Add a Follow-up' : 'Provide Additional Details'}
+                  </p>
+                  {msg && (
+                    <p className={`text-sm mb-2 ${msg.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>{msg}</p>
+                  )}
+                  <textarea value={messageText} onChange={e => setMessageText(e.target.value)}
+                    rows={4}
+                    placeholder={activeAction === 'follow-up'
+                      ? 'Add more context or an update to this ticket…'
+                      : 'Share the additional details our team requested…'}
+                    className="input-field resize-none text-sm mb-3" disabled={submitting} />
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleAction(activeAction, activeAction === 'follow-up' ? 'Follow-up added.' : 'Details submitted.')}
+                      disabled={submitting || !messageText.trim()}
+                      className="btn-primary text-sm">
+                      {submitting ? <><LoadingSpinner size="sm" /> Submitting…</> : 'Submit'}
+                    </button>
+                    <button onClick={closeAction} className="btn-secondary text-sm">Cancel</button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-wrap gap-3">
+                  <button onClick={() => setActiveAction('follow-up')}
+                    className="text-sm text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/>
+                    </svg>
+                    Add follow-up
+                  </button>
+                  <button onClick={() => setActiveAction('provide-details')}
+                    className="text-sm text-amber-600 hover:text-amber-700 font-medium flex items-center gap-1">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+                    </svg>
+                    Provide details
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Main page ────────────────────────────────────────────────────────────────
+function EmailTicketsPageInner() {
+  const searchParams = useSearchParams();
+  const router       = useRouter();
+  const email        = searchParams.get('email') || '';
+
+  const [tickets,      setTickets]      = useState([]);
+  const [loading,      setLoading]      = useState(true);
+  const [error,        setError]        = useState('');
+  const [showForm,     setShowForm]     = useState(false);
+  const [statusFilter, setStatusFilter] = useState('All');
+
+  useEffect(() => {
+    if (!email) { router.replace('/portal'); return; }
+  }, [email, router]);
+
+  const fetchTickets = useCallback(async () => {
+    if (!email) return;
+    setLoading(true);
+    setError('');
+    try {
+      const res  = await fetch(`/api/portal/tickets?email=${encodeURIComponent(email)}`);
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      setTickets(data.tickets || []);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [email]);
+
+  useEffect(() => { fetchTickets(); }, [fetchTickets]);
+
+  const handleNewTicket   = (ticket) => { setTickets(p => [ticket, ...p]); setShowForm(false); };
+
+  const filtered = statusFilter === 'All' ? tickets : tickets.filter(t => t.status === statusFilter);
+  const counts   = {
+    All:           tickets.length,
+    Open:          tickets.filter(t => t.status === 'Open').length,
+    'In Progress': tickets.filter(t => t.status === 'In Progress').length,
+    Resolved:      tickets.filter(t => t.status === 'Resolved').length,
+  };
+
+  if (!email) return null;
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      {/* Navbar */}
+      <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
+        <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between gap-4">
+          <Link href="/portal" className="flex items-center gap-2">
+            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
+              <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M18.364 5.636l-3.536 3.536m0 5.656l3.536 3.536M9.172 9.172L5.636 5.636m3.536 9.192l-3.536 3.536M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-5 0a4 4 0 11-8 0 4 4 0 018 0z"/>
+              </svg>
+            </div>
+            <span className="font-bold text-gray-900 text-sm">HelpDesk</span>
+          </Link>
+          <div className="flex items-center gap-3">
+            <p className="text-xs text-gray-500 hidden sm:block truncate max-w-[200px]">{email}</p>
+            <Link href="/portal"
+              className="text-sm text-blue-600 hover:text-blue-700 font-medium px-3 py-1.5 rounded-lg hover:bg-blue-50 transition-colors">
+              Sign in with Google
+            </Link>
+            <Link href="/portal"
+              className="text-sm text-gray-500 hover:text-red-600 transition-colors px-3 py-1.5 rounded-lg hover:bg-red-50 font-medium">
+              Sign out
+            </Link>
+          </div>
+        </div>
+      </header>
+
+      <main className="max-w-4xl mx-auto px-4 py-8">
+        {/* Header row */}
+        <div className="flex items-center justify-between mb-6 gap-4 flex-wrap">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">My Tickets</h1>
+            <p className="text-sm text-gray-500 mt-0.5">
+              Showing tickets for <span className="font-medium text-gray-700">{email}</span>
+            </p>
+          </div>
+          <button onClick={() => setShowForm(p => !p)} className="btn-primary flex items-center gap-2">
+            {showForm ? (
+              <><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></svg>Cancel</>
+            ) : (
+              <><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4"/></svg>New Ticket</>
+            )}
+          </button>
+        </div>
+
+        {/* New ticket form */}
+        {showForm && (
+          <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-6 mb-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">Submit a New Ticket</h2>
+            <TicketForm clientEmail={email} onSuccess={handleNewTicket} onCancel={() => setShowForm(false)} />
+          </div>
+        )}
+
+        {/* Stats strip */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+          {Object.entries(counts).map(([label, count]) => (
+            <button key={label} onClick={() => setStatusFilter(label)}
+              className={`p-3 rounded-xl border text-left transition-colors ${statusFilter === label ? 'bg-blue-50 border-blue-200' : 'bg-white border-gray-200 hover:bg-gray-50'}`}>
+              <p className={`text-2xl font-bold ${statusFilter === label ? 'text-blue-700' : 'text-gray-900'}`}>{count}</p>
+              <p className={`text-xs mt-0.5 ${statusFilter === label ? 'text-blue-600' : 'text-gray-500'}`}>{label}</p>
+            </button>
+          ))}
+        </div>
+
+        {/* Ticket list */}
+        {loading ? (
+          <div className="flex items-center justify-center py-20"><LoadingSpinner size="lg" /></div>
+        ) : error ? (
+          <div className="bg-red-50 border border-red-200 rounded-xl p-6 text-center">
+            <p className="text-red-700 font-medium">{error}</p>
+            <button onClick={fetchTickets} className="mt-3 text-sm text-red-600 hover:text-red-700 underline">Try again</button>
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="bg-white border border-gray-200 rounded-xl p-12 text-center">
+            <svg className="w-12 h-12 text-gray-200 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+            </svg>
+            {statusFilter === 'All' ? (
+              <>
+                <p className="text-gray-500 font-medium">No tickets yet</p>
+                <p className="text-gray-400 text-sm mt-1">Click "New Ticket" above to get support.</p>
+              </>
+            ) : (
+              <p className="text-gray-500 font-medium">No {statusFilter.toLowerCase()} tickets</p>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {filtered.map(ticket => (
+              <TicketCard key={ticket.id} ticket={ticket} clientEmail={email} />
+            ))}
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
+
+// Wrap with Suspense so useSearchParams() works during static generation
+import { Suspense } from 'react';
+
+export default function EmailTicketsPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <LoadingSpinner size="lg" />
+      </div>
+    }>
+      <EmailTicketsPageInner />
+    </Suspense>
+  );
+}
+</file>
+
 <file path="lib/activity.js">
 /**
  * Activity Logger
@@ -7016,214 +6704,331 @@ export const ACTIONS = {
 };
 </file>
 
-<file path="app/api/tickets/[id]/route.js">
+<file path="package.json">
+{
+  "name": "helpdesk",
+  "version": "1.0.0",
+  "description": "AI-powered Support Helpdesk built with Next.js",
+  "main": "index.js",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "postinstall": "prisma generate",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:seed": "node prisma/seed.js",
+    "db:studio": "prisma studio"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@google/genai": "^1.3.0",
+    "@prisma/client": "5.22.0",
+    "autoprefixer": "^10.4.0",
+    "bcryptjs": "^2.4.3",
+    "jose": "^5.9.6",
+    "jsonwebtoken": "^9.0.2",
+    "next": "^15.0.0",
+    "next-auth": "4.24.11",
+    "nodemailer": "6.9.16",
+    "postcss": "^8.4.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "tailwindcss": "^3.4.0"
+  },
+  "devDependencies": {
+    "prisma": "5.22.0"
+  }
+}
+</file>
+
+<file path="app/admin/page.jsx">
+'use client';
+
 /**
- * /api/tickets/[id]
- * GET    - Fetch ticket + activity log (protected)
- * PATCH  - Update status / assignedTeams / priority (TeamMember own team | Admin all)
- * DELETE - Delete ticket (TeamMember own team | Admin all)
+ * Admin Dashboard — /admin
+ * Protected (Admin only). Full access to all tickets with filtering and reassignment.
  */
 
-import { NextResponse } from 'next/server';
-import prisma from '../../../../lib/prisma';
-import { getUserFromRequest } from '../../../../lib/auth';
-import { logActivity, buildDetail, ACTIONS } from '../../../../lib/activity';
-import {
-  sendTicketResolvedClient,
-  sendTicketResolvedAdmin,
-  sendChangeNotificationActor,
-} from '../../../../lib/mailer';
+import { useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
+import Navbar from '../components/Navbar';
+import TicketTable from '../components/TicketTable';
+import StatsCards from '../components/StatsCards';
+import FilterBar from '../components/FilterBar';
+import LoadingSpinner from '../components/LoadingSpinner';
 
-const VALID_TEAMS      = ['Development', 'Billing', 'HR', 'Support'];
-const VALID_STATUSES   = ['Open', 'In Progress', 'Resolved'];
-const VALID_PRIORITIES = ['Low', 'Medium', 'High'];
+export default function AdminPage() {
+  const router = useRouter();
+  const [user, setUser] = useState(null);
+  const [tickets, setTickets] = useState([]);
+  const [filteredTickets, setFilteredTickets] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [filters, setFilters] = useState({
+    status: '',
+    category: '',
+    priority: '',
+    team: '',
+  });
 
-/** Returns true if the user is on at least one of the ticket's assigned teams */
-function userCanAccessTicket(user, ticket) {
-  if (user.role === 'Admin') return true;
-  if (user.role === 'TeamMember' && user.team) {
-    return ticket.assignedTeams.includes(user.team);
+  // AI status
+  const [aiStatus, setAiStatus] = useState(null);
+  const [aiChecking, setAiChecking] = useState(false);
+
+  // Auth check
+  useEffect(() => {
+    fetch('/api/team-auth/me')
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((data) => {
+        if (!data.user || data.user.role !== 'Admin') {
+          router.push('/login');
+          return;
+        }
+        setUser(data.user);
+      })
+      .catch(() => router.push('/login'));
+  }, [router]);
+
+  // Fetch ALL tickets
+  const fetchTickets = useCallback(async () => {
+    if (!user) return;
+    setLoading(true);
+    setError('');
+    try {
+      const res = await fetch('/api/tickets');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to load tickets');
+      setTickets(data.tickets);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [user]);
+
+  const checkAiStatus = async () => {
+    setAiChecking(true);
+    try {
+      const res  = await fetch('/api/admin/ai-status');
+      const data = await res.json();
+      setAiStatus(data);
+    } catch {
+      setAiStatus({ status: 'error', message: 'Could not reach the status endpoint.' });
+    } finally {
+      setAiChecking(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchTickets();
+  }, [fetchTickets]);
+
+  // Client-side filtering
+  useEffect(() => {
+    let result = [...tickets];
+    if (filters.status) result = result.filter((t) => t.status === filters.status);
+    if (filters.category) result = result.filter((t) => t.category === filters.category);
+    if (filters.priority) result = result.filter((t) => t.priority === filters.priority);
+    if (filters.team) result = result.filter((t) =>
+      (t.assignedTeams ?? (t.assignedTeam ? [t.assignedTeam] : [])).includes(filters.team)
+    );
+    setFilteredTickets(result);
+  }, [tickets, filters]);
+
+  const handleFilterChange = (key, value) => {
+    setFilters((prev) => ({ ...prev, [key]: value }));
+  };
+
+  // Team distribution breakdown
+  const teamBreakdown = () => {
+    const teams = ['Development', 'Billing', 'HR', 'Support'];
+    return teams.map((team) => ({
+      team,
+      count: tickets.filter((t) =>
+        (t.assignedTeams || (t.assignedTeam ? [t.assignedTeam] : [])).includes(team)
+      ).length,
+    }));
+  };
+
+  if (!user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <LoadingSpinner size="lg" />
+      </div>
+    );
   }
-  return false;
-}
 
-// GET /api/tickets/[id]
-export async function GET(request, { params }) {
-  try {
-    const { id } = await params;
-    const user = await getUserFromRequest(request);
-    if (!user) return NextResponse.json({ error: 'Unauthorized.' }, { status: 401 });
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <Navbar />
 
-    const ticket = await prisma.ticket.findUnique({
-      where: { id },
-      include: {
-        activities:  { orderBy: { createdAt: 'asc' } },
-        attachments: { orderBy: { createdAt: 'asc' } },
-      },
-    });
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Page Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
+          <div>
+            <div className="flex items-center gap-3 mb-1">
+              <h1 className="text-2xl font-bold text-gray-900">Admin Dashboard</h1>
+              <span className="badge bg-purple-100 text-purple-700">Admin</span>
+            </div>
+            <p className="text-gray-500 text-sm">
+              Welcome, <span className="font-medium text-gray-700">{user.name}</span>. Full access to all tickets across all teams.
+            </p>
+          </div>
+          <button
+            onClick={fetchTickets}
+            disabled={loading}
+            className="btn-secondary self-start sm:self-auto"
+          >
+            {loading ? <LoadingSpinner size="sm" /> : (
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            )}
+            Refresh
+          </button>
+        </div>
 
-    if (!ticket) return NextResponse.json({ error: 'Ticket not found.' }, { status: 404 });
+        {error && (
+          <div className="alert-error mb-6 flex items-center gap-2">
+            <svg className="w-4 h-4 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+            </svg>
+            {error}
+            <button onClick={fetchTickets} className="ml-auto text-xs underline">Retry</button>
+          </div>
+        )}
 
-    if (!userCanAccessTicket(user, ticket)) {
-      return NextResponse.json({ error: 'Access denied.' }, { status: 403 });
-    }
+        {loading && tickets.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-24 gap-3">
+            <LoadingSpinner size="lg" />
+            <p className="text-gray-500 text-sm">Loading all tickets…</p>
+          </div>
+        ) : (
+          <>
+            {/* AI Status */}
+            <div className="mb-6 p-4 bg-white border border-gray-200 rounded-xl flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${
+                  !aiStatus            ? 'bg-gray-300' :
+                  aiStatus.status === 'connected' ? 'bg-green-500 animate-pulse' :
+                  'bg-red-400'
+                }`} />
+                <div>
+                  <p className="text-sm font-semibold text-gray-800">
+                    Vertex AI (Gemini)
+                    {aiStatus && (
+                      <span className={`ml-2 text-xs font-medium px-2 py-0.5 rounded-full ${
+                        aiStatus.status === 'connected'
+                          ? 'bg-green-100 text-green-700'
+                          : 'bg-red-100 text-red-700'
+                      }`}>
+                        {aiStatus.status === 'connected' ? '✓ Connected' : aiStatus.status.replace(/_/g, ' ')}
+                      </span>
+                    )}
+                  </p>
+                  {aiStatus && (
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      {aiStatus.status === 'connected'
+                        ? `${aiStatus.model} · ${aiStatus.location} · ${aiStatus.latencyMs}ms`
+                        : aiStatus.message?.substring(0, 100)}
+                    </p>
+                  )}
+                  {!aiStatus && <p className="text-xs text-gray-400">Click to check AI classification status</p>}
+                </div>
+              </div>
+              <button onClick={checkAiStatus} disabled={aiChecking}
+                className="btn-secondary text-xs px-3 py-1.5 flex items-center gap-1.5">
+                {aiChecking ? (
+                  <><LoadingSpinner size="sm" /> Checking…</>
+                ) : (
+                  <>
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                        d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                    Check Status
+                  </>
+                )}
+              </button>
+            </div>
 
-    return NextResponse.json({ ticket });
-  } catch (err) {
-    console.error('GET /api/tickets/[id] error:', err);
-    return NextResponse.json({ error: 'Failed to fetch ticket.' }, { status: 500 });
-  }
-}
+            {/* Stats */}
+            <div className="mb-6">
+              <StatsCards tickets={tickets} />
+            </div>
 
-// PATCH /api/tickets/[id]
-export async function PATCH(request, { params }) {
-  try {
-    const { id } = await params;
-    const user = await getUserFromRequest(request);
-    if (!user) return NextResponse.json({ error: 'Unauthorized.' }, { status: 401 });
+            {/* Team Breakdown */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
+              {teamBreakdown().map(({ team, count }) => {
+                const colorMap = {
+                  Development: 'border-blue-200 bg-blue-50',
+                  Billing: 'border-emerald-200 bg-emerald-50',
+                  HR: 'border-pink-200 bg-pink-50',
+                  Support: 'border-orange-200 bg-orange-50',
+                };
+                const textMap = {
+                  Development: 'text-blue-700',
+                  Billing: 'text-emerald-700',
+                  HR: 'text-pink-700',
+                  Support: 'text-orange-700',
+                };
+                return (
+                  <button
+                    key={team}
+                    onClick={() => handleFilterChange('team', filters.team === team ? '' : team)}
+                    className={`p-4 rounded-xl border-2 text-left transition-all ${
+                      filters.team === team
+                        ? colorMap[team] + ' ring-2 ring-offset-1 ring-current'
+                        : 'border-gray-200 bg-white hover:border-gray-300'
+                    }`}
+                  >
+                    <p className={`text-2xl font-bold ${filters.team === team ? textMap[team] : 'text-gray-900'}`}>
+                      {count}
+                    </p>
+                    <p className="text-xs text-gray-500 mt-0.5">{team} Team</p>
+                  </button>
+                );
+              })}
+            </div>
 
-    const body = await request.json();
-    const { status, assignedTeams, priority } = body;
+            {/* Filters + Table */}
+            <div className="card">
+              <div className="flex flex-col gap-4 mb-6">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <h2 className="text-lg font-semibold text-gray-900">
+                    All Tickets
+                    <span className="ml-2 text-sm font-normal text-gray-500">
+                      ({filteredTickets.length}{filteredTickets.length !== tickets.length ? ` of ${tickets.length}` : ''})
+                    </span>
+                  </h2>
+                </div>
+                <FilterBar
+                  filters={filters}
+                  onChange={handleFilterChange}
+                  isAdmin={true}
+                />
+              </div>
 
-    const ticket = await prisma.ticket.findUnique({ where: { id } });
-    if (!ticket) return NextResponse.json({ error: 'Ticket not found.' }, { status: 404 });
-
-    if (!userCanAccessTicket(user, ticket)) {
-      return NextResponse.json({ error: 'Access denied.' }, { status: 403 });
-    }
-
-    // Only admins can change team assignments
-    if (assignedTeams && user.role !== 'Admin') {
-      return NextResponse.json({ error: 'Only admins can reassign teams.' }, { status: 403 });
-    }
-
-    // Validate inputs
-    if (status       && !VALID_STATUSES.includes(status))
-      return NextResponse.json({ error: 'Invalid status.' },   { status: 400 });
-    if (priority     && !VALID_PRIORITIES.includes(priority))
-      return NextResponse.json({ error: 'Invalid priority.' }, { status: 400 });
-    if (assignedTeams) {
-      if (!Array.isArray(assignedTeams) || assignedTeams.length === 0)
-        return NextResponse.json({ error: 'assignedTeams must be a non-empty array.' }, { status: 400 });
-      const invalid = assignedTeams.filter((t) => !VALID_TEAMS.includes(t));
-      if (invalid.length)
-        return NextResponse.json({ error: `Invalid team(s): ${invalid.join(', ')}` }, { status: 400 });
-    }
-
-    const updateData = {};
-    if (status)       updateData.status       = status;
-    if (assignedTeams) updateData.assignedTeams = assignedTeams;
-    if (priority)     updateData.priority     = priority;
-
-    const updated = await prisma.ticket.update({ where: { id }, data: updateData });
-
-    // ── Audit logs ────────────────────────────────────────────────────────────
-    if (status && status !== ticket.status) {
-      await logActivity({
-        ticketId: id,
-        action:   ACTIONS.STATUS_UPDATED,
-        detail:   buildDetail.statusUpdated(user, ticket.status, status),
-        oldValue: ticket.status,
-        newValue: status,
-        actor:    user,
-      });
-    }
-
-    if (assignedTeams) {
-      const oldTeams = ticket.assignedTeams;
-      const added    = assignedTeams.filter((t) => !oldTeams.includes(t));
-      const removed  = oldTeams.filter((t) => !assignedTeams.includes(t));
-
-      if (added.length || removed.length) {
-        await logActivity({
-          ticketId: id,
-          action:   ACTIONS.TEAMS_UPDATED,
-          detail:   buildDetail.teamsUpdated(user, added, removed),
-          oldValue: oldTeams.join(', '),
-          newValue: assignedTeams.join(', '),
-          actor:    user,
-        });
-      }
-    }
-
-    if (priority && priority !== ticket.priority) {
-      await logActivity({
-        ticketId: id,
-        action:   ACTIONS.PRIORITY_CHANGED,
-        detail:   buildDetail.priorityChanged(user, ticket.priority, priority),
-        oldValue: ticket.priority,
-        newValue: priority,
-        actor:    user,
-      });
-    }
-
-    // ── Email notifications ───────────────────────────────────────────────────
-    // Build a list of what changed for the actor confirmation email
-    const changes = [];
-    if (status && status !== ticket.status) {
-      changes.push({ label: 'Status', from: ticket.status, to: status });
-    }
-    if (priority && priority !== ticket.priority) {
-      changes.push({ label: 'Priority', from: ticket.priority, to: priority });
-    }
-    if (assignedTeams) {
-      const added   = assignedTeams.filter((t) => !ticket.assignedTeams.includes(t));
-      const removed = ticket.assignedTeams.filter((t) => !assignedTeams.includes(t));
-      if (added.length || removed.length) {
-        changes.push({
-          label: 'Teams',
-          from:  ticket.assignedTeams.join(', '),
-          to:    assignedTeams.join(', '),
-        });
-      }
-    }
-
-    if (changes.length > 0) {
-      // Always notify the actor about what they changed
-      sendChangeNotificationActor(updated, user, changes);
-
-      // If ticket just became Resolved — notify client + admin
-      if (status === 'Resolved' && ticket.status !== 'Resolved') {
-        sendTicketResolvedClient(updated);
-        sendTicketResolvedAdmin(updated, user);
-      }
-    }
-
-    return NextResponse.json({ success: true, ticket: updated });
-  } catch (err) {
-    console.error('PATCH /api/tickets/[id] error:', err);
-    return NextResponse.json({ error: 'Failed to update ticket.' }, { status: 500 });
-  }
-}
-
-// DELETE /api/tickets/[id]
-export async function DELETE(request, { params }) {
-  try {
-    const { id } = await params;
-    const user = await getUserFromRequest(request);
-    if (!user) return NextResponse.json({ error: 'Unauthorized.' }, { status: 401 });
-
-    const ticket = await prisma.ticket.findUnique({ where: { id } });
-    if (!ticket) return NextResponse.json({ error: 'Ticket not found.' }, { status: 404 });
-
-    if (!userCanAccessTicket(user, ticket)) {
-      return NextResponse.json({ error: 'Access denied.' }, { status: 403 });
-    }
-
-    await logActivity({
-      ticketId: id,
-      action:   ACTIONS.TICKET_DELETED,
-      detail:   buildDetail.ticketDeleted(user, ticket.subject),
-      actor:    user,
-    });
-
-    await prisma.ticket.delete({ where: { id } });
-
-    return NextResponse.json({ success: true, message: 'Ticket deleted.' });
-  } catch (err) {
-    console.error('DELETE /api/tickets/[id] error:', err);
-    return NextResponse.json({ error: 'Failed to delete ticket.' }, { status: 500 });
-  }
+              <TicketTable
+                tickets={filteredTickets}
+                isAdmin={true}
+                userRole={user.role}
+                userTeam={user.team}
+                hasActiveFilters={!!(filters.status || filters.category || filters.priority || filters.team)}
+                onClearFilters={() => setFilters({ status: '', category: '', priority: '', team: '' })}
+                onTicketDeleted={(deletedId) => {
+                  setTickets((prev) => prev.filter((t) => t.id !== deletedId));
+                }}
+              />
+            </div>
+          </>
+        )}
+      </main>
+    </div>
+  );
 }
 </file>
 
@@ -7454,6 +7259,388 @@ export default function ActivityTimeline({
         </div>
       )}
     </div>
+  );
+}
+</file>
+
+<file path="app/api/tickets/[id]/route.js">
+/**
+ * /api/tickets/[id]
+ * GET    - Fetch ticket + activity log (protected)
+ * PATCH  - Update status / assignedTeams / priority (TeamMember own team | Admin all)
+ * DELETE - Delete ticket (TeamMember own team | Admin all)
+ */
+
+import { NextResponse } from 'next/server';
+import prisma from '../../../../lib/prisma';
+import { getUserFromRequest } from '../../../../lib/auth';
+import { logActivity, buildDetail, ACTIONS } from '../../../../lib/activity';
+import {
+  sendTicketResolvedClient,
+  sendTicketResolvedAdmin,
+  sendChangeNotificationActor,
+} from '../../../../lib/mailer';
+
+const VALID_TEAMS      = ['Development', 'Billing', 'HR', 'Support'];
+const VALID_STATUSES   = ['Open', 'In Progress', 'Resolved'];
+const VALID_PRIORITIES = ['Low', 'Medium', 'High'];
+
+/** Returns true if the user is on at least one of the ticket's assigned teams */
+function userCanAccessTicket(user, ticket) {
+  if (user.role === 'Admin') return true;
+  if (user.role === 'TeamMember' && user.team) {
+    return ticket.assignedTeams.includes(user.team);
+  }
+  return false;
+}
+
+// GET /api/tickets/[id]
+export async function GET(request, { params }) {
+  try {
+    const { id } = await params;
+    const user = await getUserFromRequest(request);
+    if (!user) return NextResponse.json({ error: 'Unauthorized.' }, { status: 401 });
+
+    const ticket = await prisma.ticket.findUnique({
+      where: { id },
+      include: {
+        activities:  { orderBy: { createdAt: 'asc' } },
+        attachments: { orderBy: { createdAt: 'asc' } },
+      },
+    });
+
+    if (!ticket) return NextResponse.json({ error: 'Ticket not found.' }, { status: 404 });
+
+    if (!userCanAccessTicket(user, ticket)) {
+      return NextResponse.json({ error: 'Access denied.' }, { status: 403 });
+    }
+
+    return NextResponse.json({ ticket });
+  } catch (err) {
+    console.error('GET /api/tickets/[id] error:', err);
+    return NextResponse.json({ error: 'Failed to fetch ticket.' }, { status: 500 });
+  }
+}
+
+// PATCH /api/tickets/[id]
+export async function PATCH(request, { params }) {
+  try {
+    const { id } = await params;
+    const user = await getUserFromRequest(request);
+    if (!user) return NextResponse.json({ error: 'Unauthorized.' }, { status: 401 });
+
+    const body = await request.json();
+    const { status, assignedTeams, priority } = body;
+
+    const ticket = await prisma.ticket.findUnique({ where: { id } });
+    if (!ticket) return NextResponse.json({ error: 'Ticket not found.' }, { status: 404 });
+
+    if (!userCanAccessTicket(user, ticket)) {
+      return NextResponse.json({ error: 'Access denied.' }, { status: 403 });
+    }
+
+    // Only admins can change team assignments
+    if (assignedTeams && user.role !== 'Admin') {
+      return NextResponse.json({ error: 'Only admins can reassign teams.' }, { status: 403 });
+    }
+
+    // Validate inputs
+    if (status       && !VALID_STATUSES.includes(status))
+      return NextResponse.json({ error: 'Invalid status.' },   { status: 400 });
+    if (priority     && !VALID_PRIORITIES.includes(priority))
+      return NextResponse.json({ error: 'Invalid priority.' }, { status: 400 });
+    if (assignedTeams) {
+      if (!Array.isArray(assignedTeams) || assignedTeams.length === 0)
+        return NextResponse.json({ error: 'assignedTeams must be a non-empty array.' }, { status: 400 });
+      const invalid = assignedTeams.filter((t) => !VALID_TEAMS.includes(t));
+      if (invalid.length)
+        return NextResponse.json({ error: `Invalid team(s): ${invalid.join(', ')}` }, { status: 400 });
+    }
+
+    const updateData = {};
+    if (status)       updateData.status       = status;
+    if (assignedTeams) updateData.assignedTeams = assignedTeams;
+    if (priority)     updateData.priority     = priority;
+
+    const updated = await prisma.ticket.update({ where: { id }, data: updateData });
+
+    // ── Audit logs ────────────────────────────────────────────────────────────
+    if (status && status !== ticket.status) {
+      await logActivity({
+        ticketId: id,
+        action:   ACTIONS.STATUS_UPDATED,
+        detail:   buildDetail.statusUpdated(user, ticket.status, status),
+        oldValue: ticket.status,
+        newValue: status,
+        actor:    user,
+      });
+    }
+
+    if (assignedTeams) {
+      const oldTeams = ticket.assignedTeams;
+      const added    = assignedTeams.filter((t) => !oldTeams.includes(t));
+      const removed  = oldTeams.filter((t) => !assignedTeams.includes(t));
+
+      if (added.length || removed.length) {
+        await logActivity({
+          ticketId: id,
+          action:   ACTIONS.TEAMS_UPDATED,
+          detail:   buildDetail.teamsUpdated(user, added, removed),
+          oldValue: oldTeams.join(', '),
+          newValue: assignedTeams.join(', '),
+          actor:    user,
+        });
+      }
+    }
+
+    if (priority && priority !== ticket.priority) {
+      await logActivity({
+        ticketId: id,
+        action:   ACTIONS.PRIORITY_CHANGED,
+        detail:   buildDetail.priorityChanged(user, ticket.priority, priority),
+        oldValue: ticket.priority,
+        newValue: priority,
+        actor:    user,
+      });
+    }
+
+    // ── Email notifications ───────────────────────────────────────────────────
+    // Build a list of what changed for the actor confirmation email
+    const changes = [];
+    if (status && status !== ticket.status) {
+      changes.push({ label: 'Status', from: ticket.status, to: status });
+    }
+    if (priority && priority !== ticket.priority) {
+      changes.push({ label: 'Priority', from: ticket.priority, to: priority });
+    }
+    if (assignedTeams) {
+      const added   = assignedTeams.filter((t) => !ticket.assignedTeams.includes(t));
+      const removed = ticket.assignedTeams.filter((t) => !assignedTeams.includes(t));
+      if (added.length || removed.length) {
+        changes.push({
+          label: 'Teams',
+          from:  ticket.assignedTeams.join(', '),
+          to:    assignedTeams.join(', '),
+        });
+      }
+    }
+
+    if (changes.length > 0) {
+      // Always notify the actor about what they changed
+      sendChangeNotificationActor(updated, user, changes);
+
+      // If ticket just became Resolved — notify client + admin
+      if (status === 'Resolved' && ticket.status !== 'Resolved') {
+        sendTicketResolvedClient(updated);
+        sendTicketResolvedAdmin(updated, user);
+      }
+    }
+
+    return NextResponse.json({ success: true, ticket: updated });
+  } catch (err) {
+    console.error('PATCH /api/tickets/[id] error:', err);
+    return NextResponse.json({ error: 'Failed to update ticket.' }, { status: 500 });
+  }
+}
+
+// DELETE /api/tickets/[id]
+export async function DELETE(request, { params }) {
+  try {
+    const { id } = await params;
+    const user = await getUserFromRequest(request);
+    if (!user) return NextResponse.json({ error: 'Unauthorized.' }, { status: 401 });
+
+    const ticket = await prisma.ticket.findUnique({ where: { id } });
+    if (!ticket) return NextResponse.json({ error: 'Ticket not found.' }, { status: 404 });
+
+    if (!userCanAccessTicket(user, ticket)) {
+      return NextResponse.json({ error: 'Access denied.' }, { status: 403 });
+    }
+
+    await logActivity({
+      ticketId: id,
+      action:   ACTIONS.TICKET_DELETED,
+      detail:   buildDetail.ticketDeleted(user, ticket.subject),
+      actor:    user,
+    });
+
+    await prisma.ticket.delete({ where: { id } });
+
+    return NextResponse.json({ success: true, message: 'Ticket deleted.' });
+  } catch (err) {
+    console.error('DELETE /api/tickets/[id] error:', err);
+    return NextResponse.json({ error: 'Failed to delete ticket.' }, { status: 500 });
+  }
+}
+</file>
+
+<file path="app/components/Navbar.jsx">
+'use client';
+
+/**
+ * Navbar component
+ * Shows navigation links and the current user's info with a logout button.
+ * Uses a `loading` state to suppress the unauthenticated flash before auth resolves.
+ */
+
+import { useState, useEffect } from 'react';
+import Link from 'next/link';
+import { useRouter, usePathname } from 'next/navigation';
+
+export default function Navbar() {
+  const router   = useRouter();
+  const pathname = usePathname();
+
+  const [user,     setUser]     = useState(null);
+  const [loading,  setLoading]  = useState(true);   // true until first auth check completes
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  useEffect(() => {
+    setLoading(true);
+    fetch('/api/team-auth/me')
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => {
+        setUser(data?.user ?? null);
+      })
+      .catch(() => { setUser(null); })
+      .finally(() => setLoading(false));
+  }, [pathname]);
+
+  const handleLogout = async () => {
+    await fetch('/api/team-auth/logout', { method: 'POST' });
+    setUser(null);
+    router.push('/login');
+  };
+
+  const navLinks = user
+    ? user.role === 'Admin'
+      ? [
+          { href: '/admin',       label: 'Admin Dashboard' },
+          { href: '/admin/users', label: 'Users' },
+          { href: '/portal',      label: 'Client Portal' },
+        ]
+      : [
+          { href: '/dashboard', label: 'My Dashboard' },
+        ]
+    : [
+        { href: '/portal', label: 'Client Portal' },
+        { href: '/login',  label: 'Team Login' },
+      ];
+
+  return (
+    <nav className="bg-white border-b border-gray-200 sticky top-0 z-50 shadow-sm">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex items-center justify-between h-16">
+
+          {/* Logo — always visible */}
+          <Link href="/" className="flex items-center gap-2">
+            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
+              <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M18.364 5.636l-3.536 3.536m0 5.656l3.536 3.536M9.172 9.172L5.636 5.636m3.536 9.192l-3.536 3.536M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-5 0a4 4 0 11-8 0 4 4 0 018 0z"/>
+              </svg>
+            </div>
+            <span className="text-lg font-bold text-gray-900">HelpDesk</span>
+            <span className="hidden sm:block text-xs text-blue-600 font-medium bg-blue-50 px-2 py-0.5 rounded-full">AI</span>
+          </Link>
+
+          {/* Desktop links — hidden while loading to prevent flash */}
+          <div className="hidden md:flex items-center gap-1">
+            {!loading && navLinks.map((link) => (
+              <Link key={link.href} href={link.href}
+                className={`px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
+                  pathname === link.href
+                    ? 'text-blue-600 bg-blue-50'
+                    : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+                }`}>
+                {link.label}
+              </Link>
+            ))}
+          </div>
+
+          {/* Right side — skeleton while loading, then real content */}
+          <div className="hidden md:flex items-center gap-3">
+            {loading ? (
+              /* Subtle skeleton — same height as real content, no visible shift */
+              <div className="flex items-center gap-3 animate-pulse">
+                <div className="h-4 w-24 bg-gray-100 rounded" />
+                <div className="w-8 h-8 bg-gray-100 rounded-full" />
+              </div>
+            ) : user ? (
+              <>
+                <div className="text-right">
+                  <p className="text-sm font-medium text-gray-900">{user.name}</p>
+                  <p className="text-xs text-gray-500">{user.role}{user.team ? ` · ${user.team}` : ''}</p>
+                </div>
+                <div className="w-8 h-8 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center text-sm font-bold">
+                  {user.name.charAt(0).toUpperCase()}
+                </div>
+                <Link href="/settings"
+                  className="text-sm text-gray-500 hover:text-blue-600 transition-colors px-2 py-1.5 rounded-lg hover:bg-blue-50"
+                  title="Account Settings">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                      d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                  </svg>
+                </Link>
+                <button onClick={handleLogout}
+                  className="text-sm text-gray-500 hover:text-red-600 transition-colors px-2 py-1.5 rounded-lg hover:bg-red-50">
+                  Logout
+                </button>
+              </>
+            ) : (
+              <div className="flex items-center gap-2">
+                <Link href="/portal"
+                  className="text-sm font-medium text-blue-600 hover:text-blue-700 px-3 py-2 rounded-lg hover:bg-blue-50 transition-colors">
+                  Client Portal
+                </Link>
+                <Link href="/login" className="btn-primary text-xs px-4 py-2">
+                  Team Login
+                </Link>
+              </div>
+            )}
+          </div>
+
+          {/* Mobile menu button */}
+          <button onClick={() => setMenuOpen(!menuOpen)}
+            className="md:hidden p-2 rounded-lg text-gray-500 hover:bg-gray-100"
+            aria-label="Toggle menu">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              {menuOpen
+                ? <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/>
+                : <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16"/>
+              }
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      {/* Mobile Menu */}
+      {menuOpen && !loading && (
+        <div className="md:hidden border-t border-gray-100 bg-white px-4 pb-4 pt-2">
+          {navLinks.map((link) => (
+            <Link key={link.href} href={link.href}
+              onClick={() => setMenuOpen(false)}
+              className="block py-2 text-sm text-gray-700 hover:text-blue-600">
+              {link.label}
+            </Link>
+          ))}
+          {user && (
+            <>
+              <Link href="/settings" onClick={() => setMenuOpen(false)}
+                className="block py-2 text-sm text-gray-700 hover:text-blue-600">
+                ⚙️ Account Settings
+              </Link>
+              <button onClick={() => { handleLogout(); setMenuOpen(false); }}
+                className="block w-full text-left py-2 text-sm text-red-600">
+                Logout
+              </button>
+            </>
+          )}
+        </div>
+      )}
+    </nav>
   );
 }
 </file>
@@ -8104,177 +8291,6 @@ export default function TicketDetailPage() {
         </div>
       )}
     </div>
-  );
-}
-</file>
-
-<file path="app/components/Navbar.jsx">
-'use client';
-
-/**
- * Navbar component
- * Shows navigation links and the current user's info with a logout button.
- * Uses a `loading` state to suppress the unauthenticated flash before auth resolves.
- */
-
-import { useState, useEffect } from 'react';
-import Link from 'next/link';
-import { useRouter, usePathname } from 'next/navigation';
-
-export default function Navbar() {
-  const router   = useRouter();
-  const pathname = usePathname();
-
-  const [user,     setUser]     = useState(null);
-  const [loading,  setLoading]  = useState(true);   // true until first auth check completes
-  const [menuOpen, setMenuOpen] = useState(false);
-
-  useEffect(() => {
-    setLoading(true);
-    fetch('/api/team-auth/me')
-      .then((r) => r.ok ? r.json() : null)
-      .then((data) => {
-        setUser(data?.user ?? null);
-      })
-      .catch(() => { setUser(null); })
-      .finally(() => setLoading(false));
-  }, [pathname]);
-
-  const handleLogout = async () => {
-    await fetch('/api/team-auth/logout', { method: 'POST' });
-    setUser(null);
-    router.push('/login');
-  };
-
-  const navLinks = user
-    ? user.role === 'Admin'
-      ? [
-          { href: '/admin',       label: 'Admin Dashboard' },
-          { href: '/admin/users', label: 'Users' },
-          { href: '/portal',      label: 'Client Portal' },
-        ]
-      : [
-          { href: '/dashboard', label: 'My Dashboard' },
-        ]
-    : [
-        { href: '/portal', label: 'Client Portal' },
-        { href: '/login',  label: 'Team Login' },
-      ];
-
-  return (
-    <nav className="bg-white border-b border-gray-200 sticky top-0 z-50 shadow-sm">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16">
-
-          {/* Logo — always visible */}
-          <Link href="/" className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
-              <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                  d="M18.364 5.636l-3.536 3.536m0 5.656l3.536 3.536M9.172 9.172L5.636 5.636m3.536 9.192l-3.536 3.536M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-5 0a4 4 0 11-8 0 4 4 0 018 0z"/>
-              </svg>
-            </div>
-            <span className="text-lg font-bold text-gray-900">HelpDesk</span>
-            <span className="hidden sm:block text-xs text-blue-600 font-medium bg-blue-50 px-2 py-0.5 rounded-full">AI</span>
-          </Link>
-
-          {/* Desktop links — hidden while loading to prevent flash */}
-          <div className="hidden md:flex items-center gap-1">
-            {!loading && navLinks.map((link) => (
-              <Link key={link.href} href={link.href}
-                className={`px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
-                  pathname === link.href
-                    ? 'text-blue-600 bg-blue-50'
-                    : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-                }`}>
-                {link.label}
-              </Link>
-            ))}
-          </div>
-
-          {/* Right side — skeleton while loading, then real content */}
-          <div className="hidden md:flex items-center gap-3">
-            {loading ? (
-              /* Subtle skeleton — same height as real content, no visible shift */
-              <div className="flex items-center gap-3 animate-pulse">
-                <div className="h-4 w-24 bg-gray-100 rounded" />
-                <div className="w-8 h-8 bg-gray-100 rounded-full" />
-              </div>
-            ) : user ? (
-              <>
-                <div className="text-right">
-                  <p className="text-sm font-medium text-gray-900">{user.name}</p>
-                  <p className="text-xs text-gray-500">{user.role}{user.team ? ` · ${user.team}` : ''}</p>
-                </div>
-                <div className="w-8 h-8 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center text-sm font-bold">
-                  {user.name.charAt(0).toUpperCase()}
-                </div>
-                <Link href="/settings"
-                  className="text-sm text-gray-500 hover:text-blue-600 transition-colors px-2 py-1.5 rounded-lg hover:bg-blue-50"
-                  title="Account Settings">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                      d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
-                  </svg>
-                </Link>
-                <button onClick={handleLogout}
-                  className="text-sm text-gray-500 hover:text-red-600 transition-colors px-2 py-1.5 rounded-lg hover:bg-red-50">
-                  Logout
-                </button>
-              </>
-            ) : (
-              <div className="flex items-center gap-2">
-                <Link href="/portal"
-                  className="text-sm font-medium text-blue-600 hover:text-blue-700 px-3 py-2 rounded-lg hover:bg-blue-50 transition-colors">
-                  Client Portal
-                </Link>
-                <Link href="/login" className="btn-primary text-xs px-4 py-2">
-                  Team Login
-                </Link>
-              </div>
-            )}
-          </div>
-
-          {/* Mobile menu button */}
-          <button onClick={() => setMenuOpen(!menuOpen)}
-            className="md:hidden p-2 rounded-lg text-gray-500 hover:bg-gray-100"
-            aria-label="Toggle menu">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              {menuOpen
-                ? <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/>
-                : <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16"/>
-              }
-            </svg>
-          </button>
-        </div>
-      </div>
-
-      {/* Mobile Menu */}
-      {menuOpen && !loading && (
-        <div className="md:hidden border-t border-gray-100 bg-white px-4 pb-4 pt-2">
-          {navLinks.map((link) => (
-            <Link key={link.href} href={link.href}
-              onClick={() => setMenuOpen(false)}
-              className="block py-2 text-sm text-gray-700 hover:text-blue-600">
-              {link.label}
-            </Link>
-          ))}
-          {user && (
-            <>
-              <Link href="/settings" onClick={() => setMenuOpen(false)}
-                className="block py-2 text-sm text-gray-700 hover:text-blue-600">
-                ⚙️ Account Settings
-              </Link>
-              <button onClick={() => { handleLogout(); setMenuOpen(false); }}
-                className="block w-full text-left py-2 text-sm text-red-600">
-                Logout
-              </button>
-            </>
-          )}
-        </div>
-      )}
-    </nav>
   );
 }
 </file>
