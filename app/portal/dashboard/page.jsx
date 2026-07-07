@@ -297,6 +297,31 @@ function TicketCard({ ticket, clientEmail }) {
             </div>
           )}
 
+          {/* Messages from the support team */}
+          {ticket.activities?.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Messages from Support Team</p>
+              {ticket.activities.map(act => (
+                <div key={act.id} className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <div className="flex items-center gap-1.5">
+                      <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-200 text-amber-800 text-xs font-bold">
+                        {act.userName ? act.userName.charAt(0).toUpperCase() : '?'}
+                      </span>
+                      <span className="text-xs font-semibold text-amber-800">
+                        {act.userName}{act.userTeam ? ` · ${act.userTeam}` : ''}
+                      </span>
+                    </div>
+                    <time className="text-xs text-amber-600">
+                      {new Date(act.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                    </time>
+                  </div>
+                  <p className="text-sm text-amber-900 leading-snug whitespace-pre-wrap">{act.newValue}</p>
+                </div>
+              ))}
+            </div>
+          )}
+
           {ticket.attachments?.length > 0 && (
             <div>
               <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Attachments</p>

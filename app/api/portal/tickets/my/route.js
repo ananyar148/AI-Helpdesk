@@ -49,6 +49,11 @@ export async function GET(request) {
             id: true, fileName: true, mimeType: true, sizeBytes: true, createdAt: true,
           },
         },
+        activities: {
+          where:   { action: 'details_requested' },
+          orderBy: { createdAt: 'desc' },
+          select:  { id: true, action: true, detail: true, newValue: true, createdAt: true, userName: true, userTeam: true },
+        },
       },
     });
 
