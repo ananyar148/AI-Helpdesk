@@ -12,7 +12,6 @@ import Link from 'next/link';
 import Navbar from '../../components/Navbar';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import ActivityTimeline from '../../components/ActivityTimeline';
-import WorkLogPanel from '../../components/WorkLogPanel';
 import { StatusBadge, PriorityBadge, CategoryBadge, TeamsDisplay, TeamBadge } from '../../components/StatusBadge';
 
 const STATUS_OPTIONS   = ['Open', 'In Progress', 'Resolved'];
@@ -31,7 +30,6 @@ export default function TicketDetailPage() {
   const [updating,   setUpdating]   = useState(false);
   const [error,      setError]      = useState('');
   const [success,    setSuccess]    = useState('');
-  const [activeTab,  setActiveTab]  = useState('worklogs');
 
   // Multi-team picker state (admin only)
   const [selectedTeams, setSelectedTeams] = useState([]);
@@ -328,30 +326,27 @@ export default function TicketDetailPage() {
               </div>
             )}
 
-            {/* Tabs */}
+            {/* Unified Timeline */}
             <div className="card">
-              <div className="flex gap-1 mb-5 border-b border-gray-100 pb-3">
-                {[
-                  { key: 'worklogs', label: `Work Logs (${workLogs.length})` },
-                  { key: 'activity', label: `Activity (${activities.length})` },
-                ].map((tab) => (
-                  <button key={tab.key} onClick={() => setActiveTab(tab.key)}
-                    className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                      activeTab === tab.key
-                        ? 'bg-blue-600 text-white'
-                        : 'text-gray-600 hover:bg-gray-100'
-                    }`}>
-                    {tab.label}
-                  </button>
-                ))}
-              </div>
-
-              {activeTab === 'worklogs' && (
-                <WorkLogPanel ticketId={id} workLogs={workLogs} canAddLog={canAddLog} />
-              )}
-              {activeTab === 'activity' && (
-                <ActivityTimeline activities={activities} />
-              )}
+              <h2 className="text-sm font-semibold text-gray-700 mb-4">
+                Timeline
+                <span className="ml-2 text-xs font-normal text-gray-400">
+                  {activities.length + workLogs.length} entries · newest first
+                </span>
+              </h2>
+              <ActivityTimeline
+                activities={activities}
+                workLogs={workLogs}
+                ticketId={id}
+                canAddLog={canAddLog}
+                onLogAdded={(newLog) => {
+                  setWorkLogs((prev) => [...prev, newLog]);
+                  // Also refresh activities so the work_log_added event appears
+                  fetch(`/api/tickets/${id}/activity`)
+                    .then(r => r.json())
+                    .then(d => { if (d.activities) setActivities(d.activities); });
+                }}
+              />
             </div>
           </div>
 

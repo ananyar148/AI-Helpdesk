@@ -379,7 +379,7 @@ export default function PortalDashboard() {
   // Redirect unauthenticated users to portal login
   useEffect(() => {
     if (status === 'unauthenticated') {
-      router.replace('/portal/login');
+      router.replace('/portal');
     }
   }, [status, router]);
 
@@ -450,7 +450,7 @@ export default function PortalDashboard() {
               <p className="text-sm font-medium text-gray-900 leading-tight">{user.name}</p>
               <p className="text-xs text-gray-400 leading-tight">{user.email}</p>
             </div>
-            <button onClick={() => signOut({ callbackUrl: '/portal/login' })}
+            <button onClick={() => signOut({ callbackUrl: '/portal' })}
               className="text-sm text-gray-500 hover:text-red-600 transition-colors px-2 py-1 rounded-lg hover:bg-red-50 font-medium">
               Sign out
             </button>

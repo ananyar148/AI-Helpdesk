@@ -397,9 +397,13 @@ export default function EmailTicketsPage() {
           </Link>
           <div className="flex items-center gap-3">
             <p className="text-xs text-gray-500 hidden sm:block truncate max-w-[200px]">{email}</p>
-            <Link href="/portal/login"
+            <Link href="/portal"
               className="text-sm text-blue-600 hover:text-blue-700 font-medium px-3 py-1.5 rounded-lg hover:bg-blue-50 transition-colors">
               Sign in with Google
+            </Link>
+            <Link href="/portal"
+              className="text-sm text-gray-500 hover:text-red-600 transition-colors px-3 py-1.5 rounded-lg hover:bg-red-50 font-medium">
+              Sign out
             </Link>
           </div>
         </div>
