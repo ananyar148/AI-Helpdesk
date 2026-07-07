@@ -27,6 +27,10 @@ export default function AdminPage() {
     team: '',
   });
 
+  // AI status
+  const [aiStatus, setAiStatus] = useState(null);
+  const [aiChecking, setAiChecking] = useState(false);
+
   // Auth check
   useEffect(() => {
     fetch('/api/team-auth/me')
@@ -57,6 +61,19 @@ export default function AdminPage() {
       setLoading(false);
     }
   }, [user]);
+
+  const checkAiStatus = async () => {
+    setAiChecking(true);
+    try {
+      const res  = await fetch('/api/admin/ai-status');
+      const data = await res.json();
+      setAiStatus(data);
+    } catch {
+      setAiStatus({ status: 'error', message: 'Could not reach the status endpoint.' });
+    } finally {
+      setAiChecking(false);
+    }
+  };
 
   useEffect(() => {
     fetchTickets();
@@ -144,6 +161,53 @@ export default function AdminPage() {
           </div>
         ) : (
           <>
+            {/* AI Status */}
+            <div className="mb-6 p-4 bg-white border border-gray-200 rounded-xl flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${
+                  !aiStatus            ? 'bg-gray-300' :
+                  aiStatus.status === 'connected' ? 'bg-green-500 animate-pulse' :
+                  'bg-red-400'
+                }`} />
+                <div>
+                  <p className="text-sm font-semibold text-gray-800">
+                    Vertex AI (Gemini)
+                    {aiStatus && (
+                      <span className={`ml-2 text-xs font-medium px-2 py-0.5 rounded-full ${
+                        aiStatus.status === 'connected'
+                          ? 'bg-green-100 text-green-700'
+                          : 'bg-red-100 text-red-700'
+                      }`}>
+                        {aiStatus.status === 'connected' ? '✓ Connected' : aiStatus.status.replace(/_/g, ' ')}
+                      </span>
+                    )}
+                  </p>
+                  {aiStatus && (
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      {aiStatus.status === 'connected'
+                        ? `${aiStatus.model} · ${aiStatus.location} · ${aiStatus.latencyMs}ms`
+                        : aiStatus.message?.substring(0, 100)}
+                    </p>
+                  )}
+                  {!aiStatus && <p className="text-xs text-gray-400">Click to check AI classification status</p>}
+                </div>
+              </div>
+              <button onClick={checkAiStatus} disabled={aiChecking}
+                className="btn-secondary text-xs px-3 py-1.5 flex items-center gap-1.5">
+                {aiChecking ? (
+                  <><LoadingSpinner size="sm" /> Checking…</>
+                ) : (
+                  <>
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                        d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                    Check Status
+                  </>
+                )}
+              </button>
+            </div>
+
             {/* Stats */}
             <div className="mb-6">
               <StatsCards tickets={tickets} />

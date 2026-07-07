@@ -13,6 +13,11 @@ out/
 # Prisma generated files
 prisma/migrations/
 
+# Google service account key — contains private key, never commit
+training.json
+*.json.key
+service-account*.json
+
 # OS
 .DS_Store
 Thumbs.db

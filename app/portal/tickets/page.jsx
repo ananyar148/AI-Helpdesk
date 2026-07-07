@@ -361,7 +361,7 @@ function TicketCard({ ticket, clientEmail, onFollowUpSuccess }) {
 }
 
 // ─── Main page ────────────────────────────────────────────────────────────────
-export default function EmailTicketsPage() {
+function EmailTicketsPageInner() {
   const searchParams = useSearchParams();
   const router       = useRouter();
   const email        = searchParams.get('email') || '';
@@ -502,5 +502,20 @@ export default function EmailTicketsPage() {
         )}
       </main>
     </div>
+  );
+}
+
+// Wrap with Suspense so useSearchParams() works during static generation
+import { Suspense } from 'react';
+
+export default function EmailTicketsPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <LoadingSpinner size="lg" />
+      </div>
+    }>
+      <EmailTicketsPageInner />
+    </Suspense>
   );
 }

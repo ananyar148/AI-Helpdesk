@@ -1,0 +1,16 @@
+{
+  "functions": {
+    "app/api/tickets/route.js": {
+      "maxDuration": 60
+    },
+    "app/api/portal/tickets/route.js": {
+      "maxDuration": 60
+    },
+    "app/api/tickets/[id]/route.js": {
+      "maxDuration": 30
+    },
+    "app/api/admin/ai-status/route.js": {
+      "maxDuration": 30
+    }
+  }
+}

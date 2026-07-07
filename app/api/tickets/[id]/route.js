@@ -37,7 +37,10 @@ export async function GET(request, { params }) {
 
     const ticket = await prisma.ticket.findUnique({
       where: { id },
-      include: { activities: { orderBy: { createdAt: 'asc' } } },
+      include: {
+        activities:  { orderBy: { createdAt: 'asc' } },
+        attachments: { orderBy: { createdAt: 'asc' } },
+      },
     });
 
     if (!ticket) return NextResponse.json({ error: 'Ticket not found.' }, { status: 404 });
