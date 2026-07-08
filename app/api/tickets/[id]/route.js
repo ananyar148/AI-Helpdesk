@@ -12,6 +12,7 @@ import { logActivity, buildDetail, ACTIONS } from '../../../../lib/activity';
 import {
   sendTicketResolvedClient,
   sendTicketResolvedAdmin,
+  sendTicketResolvedResolver,
   sendChangeNotificationActor,
 } from '../../../../lib/mailer';
 
@@ -160,13 +161,19 @@ export async function PATCH(request, { params }) {
     }
 
     if (changes.length > 0) {
-      // Always notify the actor about what they changed
-      sendChangeNotificationActor(updated, user, changes);
+      const isResolving = status === 'Resolved' && ticket.status !== 'Resolved';
+      console.log(`[tickets/[id] route] Sending email | ticketId: ${id} | isResolving: ${isResolving} | changes: ${changes.map(c => c.label).join(', ')} | actor: ${user?.email}`);
 
-      // If ticket just became Resolved — notify client + admin
-      if (status === 'Resolved' && ticket.status !== 'Resolved') {
-        sendTicketResolvedClient(updated);
-        sendTicketResolvedAdmin(updated, user);
+      if (isResolving) {
+        // Req 3: ticket resolved → client + admin + resolver all get emails
+        await Promise.allSettled([
+          sendTicketResolvedClient(updated),
+          sendTicketResolvedAdmin(updated, user),
+          sendTicketResolvedResolver(updated, user),
+        ]);
+      } else {
+        // Req 2: non-resolve change → only the actor gets a confirmation
+        await sendChangeNotificationActor(updated, user, changes);
       }
     }
 

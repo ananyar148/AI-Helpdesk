@@ -91,6 +91,7 @@ lib/auth.js
 lib/authOptions.js
 lib/classifier.js
 lib/duplicate.js
+lib/googleai.js
 lib/mailer.js
 lib/prisma.js
 middleware.js
@@ -107,110 +108,6 @@ vercel.json
 
 <files>
 This section contains the contents of the repository's files.
-
-<file path="app/api/admin/ai-status/route.js">
-/**
- * GET /api/admin/ai-status
- * Tests Vertex AI connectivity via @google/genai and returns status.
- * Admin only.
- */
-
-import { NextResponse }       from 'next/server';
-import { getUserFromRequest } from '../../../../lib/auth';
-import { GoogleGenAI }        from '@google/genai';
-import path                   from 'path';
-import { readFileSync }       from 'fs';
-
-export async function GET(request) {
-  const user = await getUserFromRequest(request);
-  if (!user || user.role !== 'Admin') {
-    return NextResponse.json({ error: 'Unauthorized.' }, { status: 401 });
-  }
-
-  const project  = process.env.GOOGLE_CLOUD_PROJECT;
-  const location = process.env.GOOGLE_CLOUD_LOCATION || 'us-central1';
-  const credFile = process.env.GOOGLE_APP_CREDENTIALS;
-
-  // At least one credential source must be present
-  const hasCredentials =
-    !!process.env.GOOGLE_SERVICE_ACCOUNT_JSON || !!credFile;
-
-  if (!project || !hasCredentials) {
-    return NextResponse.json({
-      status:  'misconfigured',
-      message: !project
-        ? 'GOOGLE_CLOUD_PROJECT is not set.'
-        : 'No credentials found. Set GOOGLE_SERVICE_ACCOUNT_JSON (Vercel) or GOOGLE_APP_CREDENTIALS (local).',
-    });
-  }
-
-  let credentials;
-  try {
-    // Primary: env var (Vercel / production)
-    if (process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
-      credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
-    } else if (credFile) {
-      const credPath = path.resolve(process.cwd(), credFile);
-      credentials = JSON.parse(readFileSync(credPath, 'utf8'));
-    } else {
-      return NextResponse.json({
-        status:  'misconfigured',
-        message: 'Set GOOGLE_SERVICE_ACCOUNT_JSON (Vercel) or GOOGLE_APP_CREDENTIALS (local)',
-      });
-    }
-  } catch (e) {
-    return NextResponse.json({
-      status:  'misconfigured',
-      message: `Invalid credentials: ${e.message}`,
-    });
-  }
-
-  try {
-    const ai = new GoogleGenAI({
-      vertexai: true,
-      project,
-      location,
-      googleAuthOptions: {
-        credentials,
-        scopes: ['https://www.googleapis.com/auth/cloud-platform'],
-      },
-    });
-
-    const start    = Date.now();
-    const response = await ai.models.generateContent({
-      model:    'gemini-3.5-flash',
-      contents: 'Reply with exactly one word: ok',
-      config:   { temperature: 0 },
-    });
-    const ms   = Date.now() - start;
-    const text = response.text?.trim();
-
-    return NextResponse.json({
-      status:    'connected',
-      message:   'Vertex AI is working correctly.',
-      model:     'gemini-2.0-flash',
-      project,
-      location,
-      latencyMs: ms,
-      sample:    text,
-    });
-  } catch (err) {
-    const msg  = err.message || '';
-    const code = msg.includes('404') ? 'model_not_found'
-               : msg.includes('403') ? 'permission_denied'
-               : msg.includes('401') ? 'auth_failed'
-               : msg.includes('DOCTYPE') ? 'invalid_region'
-               : 'error';
-
-    return NextResponse.json({
-      status:   code,
-      message:  msg.substring(0, 300),
-      project,
-      location,
-    });
-  }
-}
-</file>
 
 <file path="app/api/auth/[...nextauth]/route.js">
 /**
@@ -573,8 +470,8 @@ export async function POST(request, { params }) {
       );
     }
 
-    // Send email (non-blocking — never let email failure fail the request)
-    sendDetailsRequestedClient(ticket, clientEmail, message, user);
+    // Send email
+    await sendDetailsRequestedClient(ticket, clientEmail, message, user);
 
     // Log the activity
     const activity = await logActivity({
@@ -1354,6 +1251,83 @@ export function findBestMatch(newTicket, existingTickets) {
 }
 </file>
 
+<file path="lib/googleai.js">
+/**
+ * lib/googleai.js
+ *
+ * Shared factory for the @google/genai Vertex AI client.
+ * Credential priority:
+ *   1. GOOGLE_SERVICE_ACCOUNT_JSON env var  (production / Vercel)
+ *   2. GOOGLE_APP_CREDENTIALS file path     (local dev fallback)
+ *
+ * Returns null if credentials or project are missing so callers can
+ * degrade gracefully instead of throwing at startup.
+ */
+
+import { GoogleGenAI } from '@google/genai';
+import path            from 'path';
+import { readFileSync } from 'fs';
+
+/**
+ * Parse credentials from environment.
+ * Returns { credentials, error } — exactly one will be non-null.
+ */
+function resolveCredentials() {
+  if (process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
+    try {
+      return { credentials: JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON), error: null };
+    } catch {
+      return { credentials: null, error: 'GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON.' };
+    }
+  }
+
+  if (process.env.GOOGLE_APP_CREDENTIALS) {
+    try {
+      const credPath = path.resolve(process.cwd(), process.env.GOOGLE_APP_CREDENTIALS);
+      return { credentials: JSON.parse(readFileSync(credPath, 'utf8')), error: null };
+    } catch {
+      return { credentials: null, error: `Cannot read service account file: ${process.env.GOOGLE_APP_CREDENTIALS}` };
+    }
+  }
+
+  return {
+    credentials: null,
+    error: 'No credentials found. Set GOOGLE_SERVICE_ACCOUNT_JSON (production) or GOOGLE_APP_CREDENTIALS (local dev).',
+  };
+}
+
+/**
+ * Build and return a GoogleGenAI client configured for Vertex AI.
+ *
+ * @returns {{ ai: GoogleGenAI|null, project: string|null, location: string, error: string|null }}
+ */
+export function buildGoogleAIClient() {
+  const project  = process.env.GOOGLE_CLOUD_PROJECT   || null;
+  const location = process.env.GOOGLE_CLOUD_LOCATION  || 'us-central1';
+
+  if (!project) {
+    return { ai: null, project: null, location, error: 'GOOGLE_CLOUD_PROJECT is not set.' };
+  }
+
+  const { credentials, error } = resolveCredentials();
+  if (!credentials) {
+    return { ai: null, project, location, error };
+  }
+
+  const ai = new GoogleGenAI({
+    vertexai: true,
+    project,
+    location,
+    googleAuthOptions: {
+      credentials,
+      scopes: ['https://www.googleapis.com/auth/cloud-platform'],
+    },
+  });
+
+  return { ai, project, location, error: null };
+}
+</file>
+
 <file path="lib/prisma.js">
 /**
  * Prisma Client singleton
@@ -1878,6 +1852,69 @@ export default function UsersPage() {
 }
 </file>
 
+<file path="app/api/admin/ai-status/route.js">
+/**
+ * GET /api/admin/ai-status
+ * Tests Vertex AI connectivity via @google/genai and returns status.
+ * Admin only.
+ */
+
+import { NextResponse }       from 'next/server';
+import { getUserFromRequest } from '../../../../lib/auth';
+import { buildGoogleAIClient } from '../../../../lib/googleai';
+
+export async function GET(request) {
+  const user = await getUserFromRequest(request);
+  if (!user || user.role !== 'Admin') {
+    return NextResponse.json({ error: 'Unauthorized.' }, { status: 401 });
+  }
+
+  const { ai, project, location, error: clientError } = buildGoogleAIClient();
+
+  if (!ai) {
+    return NextResponse.json({
+      status:  'misconfigured',
+      message: clientError,
+    });
+  }
+
+  try {
+    const start    = Date.now();
+    const response = await ai.models.generateContent({
+      model:    'gemini-2.0-flash',
+      contents: 'Reply with exactly one word: ok',
+      config:   { temperature: 0 },
+    });
+    const ms   = Date.now() - start;
+    const text = response.text?.trim();
+
+    return NextResponse.json({
+      status:    'connected',
+      message:   'Vertex AI is working correctly.',
+      model:     'gemini-2.0-flash',
+      project,
+      location,
+      latencyMs: ms,
+      sample:    text,
+    });
+  } catch (err) {
+    const msg  = err.message || '';
+    const code = msg.includes('404') ? 'model_not_found'
+               : msg.includes('403') ? 'permission_denied'
+               : msg.includes('401') ? 'auth_failed'
+               : msg.includes('DOCTYPE') ? 'invalid_region'
+               : 'error';
+
+    return NextResponse.json({
+      status:   code,
+      message:  msg.substring(0, 300),
+      project,
+      location,
+    });
+  }
+}
+</file>
+
 <file path="app/api/portal/tickets/my/route.js">
 /**
  * /api/portal/tickets/my
@@ -2139,9 +2176,11 @@ export async function POST(request) {
       });
     }
 
-    // Send emails (non-blocking)
-    sendTicketCreatedClient(ticket, normalEmail);
-    sendTicketCreatedAdmin(ticket, normalEmail);
+    // Send emails
+    await Promise.allSettled([
+      sendTicketCreatedClient(ticket, normalEmail),
+      sendTicketCreatedAdmin(ticket, normalEmail),
+    ]);
 
     return NextResponse.json({ success: true, ticket, message: 'Your ticket has been submitted.' }, { status: 201 });
   } catch (err) {
@@ -3137,349 +3176,6 @@ export const authOptions = {
 };
 </file>
 
-<file path="lib/classifier.js">
-/**
- * AI Classification Pipeline
- *
- *   Step 1 — Custom rule-based algorithm → category, team, priority + confidence score
- *   Step 2 — Cache/DB check → if near-identical issue seen recently, reuse (skip AI call)
- *   Step 3 — High confidence: keep custom classification, call Vertex AI for draft only
- *             Low confidence:  call Vertex AI for full classification + draft
- *   Step 4 — Fallback to custom result + template draft if Vertex AI unavailable
- *
- * Uses @google/genai with Vertex AI backend (service account via GOOGLE_APPLICATION_CREDENTIALS)
- */
-
-import { GoogleGenAI }  from '@google/genai';
-import path             from 'path';
-import { readFileSync } from 'fs';
-
-// ─── Constants ────────────────────────────────────────────────────────────────
-
-const CATEGORIES = ['Billing', 'Bug', 'Feature Request', 'HR', 'Other'];
-const TEAMS      = ['Development', 'Billing', 'HR', 'Support'];
-const PRIORITIES = ['Low', 'Medium', 'High'];
-
-const HIGH_CONFIDENCE_THRESHOLD = 0.70;
-
-// ─── Step 1: Custom Rule-Based Classifier ────────────────────────────────────
-
-const RULES = [
-  {
-    phrases: [
-      'charged twice', 'double charge', 'duplicate charge', 'overcharged',
-      'wrong amount', 'incorrect charge', 'payment failed', 'payment declined',
-      'payment issue', 'refund request', 'refund my', 'billing error',
-      'credit card', 'debit card', 'money back', 'subscription charge',
-      'subscription cancelled', 'invoice payment', 'pay for', 'charged for',
-    ],
-    category: 'Billing', team: 'Billing', priority: 'High', weight: 3.0,
-  },
-  {
-    phrases: [
-      'not working', 'not loading', 'not showing', 'not displaying', 'not visible',
-      'not found', 'cannot login', "can't login", 'login failed', 'login error',
-      'page crash', 'app crash', 'crashes when', 'blank screen', 'white screen',
-      'error 500', 'error 404', '500 error', '404 error', 'internal server error',
-      'throws error', 'getting error', 'shows error', 'exception',
-      'broken', 'not responding', 'keeps freezing', 'not opening',
-      'fails to load', 'failed to', 'stuck on', 'missing data', 'data not',
-      'records not', 'button not',
-    ],
-    category: 'Bug', team: 'Development', priority: 'High', weight: 3.0,
-  },
-  {
-    phrases: [
-      'feature request', 'please add', 'can you add', 'would like to have',
-      'would be great', 'suggest adding', 'nice to have',
-      'dark mode', 'add support for', 'add the ability', 'new feature',
-      'could you implement', 'enhancement', 'improvement request',
-    ],
-    category: 'Feature Request', team: 'Development', priority: 'Low', weight: 2.5,
-  },
-  {
-    phrases: [
-      'leave request', 'annual leave', 'sick leave', 'maternity leave',
-      'paternity leave', 'leave balance', 'leave approval', 'leave pending',
-      'payroll issue', 'salary problem', 'salary discrepancy', 'wrong salary',
-      'hr policy', 'hr team', 'onboarding', 'offboarding',
-      'performance review', 'promotion request', 'contract issue', 'benefits',
-    ],
-    category: 'HR', team: 'HR', priority: 'Medium', weight: 3.0,
-  },
-  {
-    phrases: [
-      'how do i', 'how to', 'i need help', 'need assistance',
-      'forgot password', 'password reset', 'reset my password', 'lost access',
-      'account locked', 'cannot access', 'set up', 'configure',
-      'getting started', 'user guide', 'documentation', 'tutorial',
-    ],
-    category: 'Other', team: 'Support', priority: 'Low', weight: 1.5,
-  },
-];
-
-const PRIORITY_OVERRIDES = {
-  High: ['urgent', 'critical', 'asap', 'immediately', 'emergency', 'blocking',
-         'cannot work', 'production down', 'data loss', 'security issue', 'severe'],
-  Low:  ['minor', 'not urgent', 'nice to have', 'eventually', 'low priority'],
-};
-
-function normalise(text) {
-  return text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ');
-}
-
-function countPhraseMatches(text, phrases) {
-  const n = normalise(text);
-  return phrases.filter(p => n.includes(p)).length;
-}
-
-function customClassify(subject, description) {
-  const text   = `${subject} ${description}`;
-  const scores = {};
-
-  for (const rule of RULES) {
-    const matches = countPhraseMatches(text, rule.phrases);
-    if (matches > 0) scores[rule.category] = (scores[rule.category] || 0) + matches * rule.weight;
-  }
-
-  if (Object.keys(scores).length === 0) {
-    return { category: 'Other', team: 'Support', priority: 'Medium', confidence: 0 };
-  }
-
-  const sorted     = Object.entries(scores).sort((a, b) => b[1] - a[1]);
-  const [topCat, topScore] = sorted[0];
-  const totalScore = sorted.reduce((s, [, v]) => s + v, 0);
-  const confidence = totalScore > 0 ? topScore / totalScore : 0;
-
-  const rule   = RULES.find(r => r.category === topCat);
-  let priority = rule?.priority ?? 'Medium';
-  if (countPhraseMatches(text, PRIORITY_OVERRIDES.High) > 0) priority = 'High';
-  else if (countPhraseMatches(text, PRIORITY_OVERRIDES.Low) > 0) priority = 'Low';
-
-  console.log(`[classifier] Custom → ${topCat}/${rule?.team} pri=${priority} conf=${confidence.toFixed(2)}`);
-  return { category: topCat, team: rule?.team ?? 'Support', priority, confidence };
-}
-
-// ─── Step 2: Cache / Near-Duplicate Check ────────────────────────────────────
-
-function tokenise(text) {
-  return text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean);
-}
-
-function similarity(a, b) {
-  const setA = new Set(tokenise(a));
-  const setB = new Set(tokenise(b));
-  const inter = new Set([...setA].filter(x => setB.has(x)));
-  const union = new Set([...setA, ...setB]);
-  return union.size === 0 ? 0 : inter.size / union.size;
-}
-
-export function findNearDuplicate(subject, description, existingTickets) {
-  const newText = `${subject} ${description}`;
-  for (const ticket of existingTickets) {
-    if (similarity(newText, `${ticket.subject} ${ticket.description}`) >= 0.70) {
-      console.log(`[classifier] Cache hit — reusing ticket ${ticket.id}`);
-      return ticket;
-    }
-  }
-  return null;
-}
-
-// ─── Step 3: Vertex AI via @google/genai ─────────────────────────────────────
-
-function buildClient() {
-  const project  = process.env.GOOGLE_CLOUD_PROJECT;
-  const location = process.env.GOOGLE_CLOUD_LOCATION || 'us-central1';
-
-  if (!project) return null;
-
-  let credentials;
-
-  // Primary: read from env var (Vercel / production)
-  if (process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
-    try {
-      credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
-    } catch {
-      console.error('[classifier] GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON');
-      return null;
-    }
-  } else if (process.env.GOOGLE_APP_CREDENTIALS) {
-    // Fallback: read from file (local dev)
-    try {
-      const credPath = path.resolve(process.cwd(), process.env.GOOGLE_APP_CREDENTIALS);
-      credentials = JSON.parse(readFileSync(credPath, 'utf8'));
-    } catch {
-      console.error('[classifier] Cannot read service account file');
-      return null;
-    }
-  } else {
-    console.warn('[classifier] No credentials — set GOOGLE_SERVICE_ACCOUNT_JSON or GOOGLE_APP_CREDENTIALS');
-    return null;
-  }
-
-  return new GoogleGenAI({
-    vertexai: true,
-    project,
-    location,
-    googleAuthOptions: {
-      credentials,
-      scopes: ['https://www.googleapis.com/auth/cloud-platform'],
-    },
-  });
-}
-
-async function callVertexAI(subject, description, hintCategory = null, hintTeam = null) {
-  const ai = buildClient();
-  if (!ai) {
-    console.warn('[classifier] Vertex AI client not configured');
-    return null;
-  }
-
-  try {
-    const hint = hintCategory
-      ? `\nOur rule-based classifier is HIGHLY confident this is "${hintCategory}" → "${hintTeam}". Agree unless clearly wrong.`
-      : '';
-
-    const prompt = `You are a support ticket classifier for a B2B software company.
-
-Team responsibilities:
-- Development: bugs, UI errors, crashes, pages not loading/showing, feature requests, anything technical
-- Billing: ONLY actual payment problems (wrong charges, refunds, payment failures, billing disputes)
-- HR: leave requests, payroll/salary issues, HR policies, employee contracts, benefits
-- Support: general how-to, password reset, account access, documentation
-
-Critical rules:
-1. "Invoice not showing in dashboard" = Development (UI/display bug, NOT a Billing issue)
-2. "Charged twice / wrong charge / refund" = Billing (actual money problem)
-3. Any crash, error, blank screen, missing data = Development${hint}
-
-Return valid JSON matching this exact schema:
-{
-  "category": one of [${CATEGORIES.map(c => `"${c}"`).join(', ')}],
-  "priority": one of [${PRIORITIES.map(p => `"${p}"`).join(', ')}],
-  "assignedTeam": one of [${TEAMS.map(t => `"${t}"`).join(', ')}],
-  "draftResponse": "professional 2-3 sentence empathetic response to the client"
-}
-
-Subject: ${subject}
-Description: ${description}`;
-
-    const response = await ai.models.generateContent({
-      model:    'gemini-3.5-flash',
-      contents: prompt,
-      config: {
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: 'object',
-          properties: {
-            category:      { type: 'string', enum: CATEGORIES },
-            priority:      { type: 'string', enum: PRIORITIES },
-            assignedTeam:  { type: 'string', enum: TEAMS },
-            draftResponse: { type: 'string' },
-          },
-          required: ['category', 'priority', 'assignedTeam', 'draftResponse'],
-        },
-        temperature: 0.1,
-      },
-    });
-
-    const text   = response.text;
-    const parsed = JSON.parse(text);
-
-    console.log(`[classifier] Vertex AI → ${parsed.category}/${parsed.assignedTeam} pri=${parsed.priority}`);
-
-    return {
-      category:      CATEGORIES.includes(parsed.category)     ? parsed.category     : 'Other',
-      assignedTeam:  TEAMS.includes(parsed.assignedTeam)       ? parsed.assignedTeam : 'Support',
-      priority:      PRIORITIES.includes(parsed.priority)      ? parsed.priority     : 'Medium',
-      draftResponse: parsed.draftResponse || '',
-    };
-  } catch (err) {
-    console.error('[classifier] Vertex AI error:', err.message);
-    return null;
-  }
-}
-
-// ─── Fallback Draft ───────────────────────────────────────────────────────────
-
-function fallbackDraft(category, subject) {
-  const drafts = {
-    Billing:           `Thank you for reaching out about a billing concern. Our billing team will review your account and respond within 1–2 business days.`,
-    Bug:               `Thank you for reporting this issue with "${subject}". Our development team has been notified and will investigate promptly.`,
-    'Feature Request': `Thank you for your suggestion regarding "${subject}". We've logged it for our product team to evaluate.`,
-    HR:                `Thank you for contacting HR about "${subject}". Our HR team will respond within 1 business day.`,
-    Other:             `Thank you for contacting support. A team member will review "${subject}" and respond within 24–48 hours.`,
-  };
-  return drafts[category] || drafts.Other;
-}
-
-// ─── Main Entry Point ─────────────────────────────────────────────────────────
-
-export async function classifyTicket(subject, description, existingTickets = []) {
-
-  // Step 2: Cache check
-  const cached = findNearDuplicate(subject, description, existingTickets);
-  if (cached) {
-    return {
-      category:      cached.category,
-      assignedTeam:  cached.assignedTeams?.[0] || cached.assignedTeam || 'Support',
-      assignedTeams: cached.assignedTeams || [cached.assignedTeam || 'Support'],
-      priority:      cached.priority,
-      draftResponse: cached.draftResponse || fallbackDraft(cached.category, subject),
-      source:        'cache',
-    };
-  }
-
-  // Step 1: Custom classifier
-  const custom = customClassify(subject, description);
-  const needsFullClassification = custom.confidence < HIGH_CONFIDENCE_THRESHOLD;
-
-  console.log(needsFullClassification
-    ? `[classifier] Low confidence (${custom.confidence.toFixed(2)}) — Vertex AI: full classification`
-    : `[classifier] High confidence (${custom.confidence.toFixed(2)}) — Vertex AI: draft only`
-  );
-
-  // Step 3: Call Vertex AI
-  const aiResult = await callVertexAI(
-    subject, description,
-    needsFullClassification ? null : custom.category,
-    needsFullClassification ? null : custom.team,
-  );
-
-  if (aiResult) {
-    if (needsFullClassification) {
-      return {
-        category:      aiResult.category,
-        assignedTeam:  aiResult.assignedTeam,
-        assignedTeams: [aiResult.assignedTeam],
-        priority:      aiResult.priority,
-        draftResponse: aiResult.draftResponse,
-        source:        'vertex-ai',
-      };
-    }
-    return {
-      category:      custom.category,
-      assignedTeam:  custom.team,
-      assignedTeams: [custom.team],
-      priority:      custom.priority,
-      draftResponse: aiResult.draftResponse,
-      source:        'custom+vertex-draft',
-    };
-  }
-
-  // Step 4: Fallback
-  console.warn('[classifier] Vertex AI unavailable — custom classification + fallback draft');
-  return {
-    category:      custom.category,
-    assignedTeam:  custom.team,
-    assignedTeams: [custom.team],
-    priority:      custom.priority,
-    draftResponse: fallbackDraft(custom.category, subject),
-    source:        'custom-fallback',
-  };
-}
-</file>
-
 <file path="README.md">
 # HelpDesk — AI-Powered Support Ticket System
 
@@ -4045,6 +3741,314 @@ Internal logs are team-facing notes — investigation findings, debugging steps,
 `prisma migrate dev` requires an advisory lock on the PostgreSQL database, which Supabase's PgBouncer (transaction pooler on port 6543) does not support — it returns a timeout error. `db push` applies schema changes directly without advisory locking. For production, `prisma migrate deploy` using the direct URL (port 5432) is the correct approach as it applies tracked migration files safely.
 </file>
 
+<file path="lib/classifier.js">
+/**
+ * AI Classification Pipeline
+ *
+ *   Step 1 — Custom rule-based algorithm → category, team, priority + confidence score
+ *   Step 2 — Cache/DB check → if near-identical issue seen recently, reuse (skip AI call)
+ *   Step 3 — High confidence: keep custom classification, call Vertex AI for draft only
+ *             Low confidence:  call Vertex AI for full classification + draft
+ *   Step 4 — Fallback to custom result + template draft if Vertex AI unavailable
+ *
+ * Uses @google/genai with Vertex AI backend (service account via GOOGLE_SERVICE_ACCOUNT_JSON)
+ */
+
+import { buildGoogleAIClient } from './googleai';
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const CATEGORIES = ['Billing', 'Bug', 'Feature Request', 'HR', 'Other'];
+const TEAMS      = ['Development', 'Billing', 'HR', 'Support'];
+const PRIORITIES = ['Low', 'Medium', 'High'];
+
+const HIGH_CONFIDENCE_THRESHOLD = 0.70;
+
+// ─── Step 1: Custom Rule-Based Classifier ────────────────────────────────────
+
+const RULES = [
+  {
+    phrases: [
+      'charged twice', 'double charge', 'duplicate charge', 'overcharged',
+      'wrong amount', 'incorrect charge', 'payment failed', 'payment declined',
+      'payment issue', 'refund request', 'refund my', 'billing error',
+      'credit card', 'debit card', 'money back', 'subscription charge',
+      'subscription cancelled', 'invoice payment', 'pay for', 'charged for',
+    ],
+    category: 'Billing', team: 'Billing', priority: 'High', weight: 3.0,
+  },
+  {
+    phrases: [
+      'not working', 'not loading', 'not showing', 'not displaying', 'not visible',
+      'not found', 'cannot login', "can't login", 'login failed', 'login error',
+      'page crash', 'app crash', 'crashes when', 'blank screen', 'white screen',
+      'error 500', 'error 404', '500 error', '404 error', 'internal server error',
+      'throws error', 'getting error', 'shows error', 'exception',
+      'broken', 'not responding', 'keeps freezing', 'not opening',
+      'fails to load', 'failed to', 'stuck on', 'missing data', 'data not',
+      'records not', 'button not',
+    ],
+    category: 'Bug', team: 'Development', priority: 'High', weight: 3.0,
+  },
+  {
+    phrases: [
+      'feature request', 'please add', 'can you add', 'would like to have',
+      'would be great', 'suggest adding', 'nice to have',
+      'dark mode', 'add support for', 'add the ability', 'new feature',
+      'could you implement', 'enhancement', 'improvement request',
+    ],
+    category: 'Feature Request', team: 'Development', priority: 'Low', weight: 2.5,
+  },
+  {
+    phrases: [
+      'leave request', 'annual leave', 'sick leave', 'maternity leave',
+      'paternity leave', 'leave balance', 'leave approval', 'leave pending',
+      'payroll issue', 'salary problem', 'salary discrepancy', 'wrong salary',
+      'hr policy', 'hr team', 'onboarding', 'offboarding',
+      'performance review', 'promotion request', 'contract issue', 'benefits',
+    ],
+    category: 'HR', team: 'HR', priority: 'Medium', weight: 3.0,
+  },
+  {
+    phrases: [
+      'how do i', 'how to', 'i need help', 'need assistance',
+      'forgot password', 'password reset', 'reset my password', 'lost access',
+      'account locked', 'cannot access', 'set up', 'configure',
+      'getting started', 'user guide', 'documentation', 'tutorial',
+    ],
+    category: 'Other', team: 'Support', priority: 'Low', weight: 1.5,
+  },
+];
+
+const PRIORITY_OVERRIDES = {
+  High: ['urgent', 'critical', 'asap', 'immediately', 'emergency', 'blocking',
+         'cannot work', 'production down', 'data loss', 'security issue', 'severe'],
+  Low:  ['minor', 'not urgent', 'nice to have', 'eventually', 'low priority'],
+};
+
+function normalise(text) {
+  return text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ');
+}
+
+function countPhraseMatches(text, phrases) {
+  const n = normalise(text);
+  return phrases.filter(p => n.includes(p)).length;
+}
+
+function customClassify(subject, description) {
+  const text   = `${subject} ${description}`;
+  const scores = {};
+
+  for (const rule of RULES) {
+    const matches = countPhraseMatches(text, rule.phrases);
+    if (matches > 0) scores[rule.category] = (scores[rule.category] || 0) + matches * rule.weight;
+  }
+
+  if (Object.keys(scores).length === 0) {
+    return { category: 'Other', team: 'Support', priority: 'Medium', confidence: 0 };
+  }
+
+  const sorted     = Object.entries(scores).sort((a, b) => b[1] - a[1]);
+  const [topCat, topScore] = sorted[0];
+  const totalScore = sorted.reduce((s, [, v]) => s + v, 0);
+  const confidence = totalScore > 0 ? topScore / totalScore : 0;
+
+  const rule   = RULES.find(r => r.category === topCat);
+  let priority = rule?.priority ?? 'Medium';
+  if (countPhraseMatches(text, PRIORITY_OVERRIDES.High) > 0) priority = 'High';
+  else if (countPhraseMatches(text, PRIORITY_OVERRIDES.Low) > 0) priority = 'Low';
+
+  console.log(`[classifier] Custom → ${topCat}/${rule?.team} pri=${priority} conf=${confidence.toFixed(2)}`);
+  return { category: topCat, team: rule?.team ?? 'Support', priority, confidence };
+}
+
+// ─── Step 2: Cache / Near-Duplicate Check ────────────────────────────────────
+
+function tokenise(text) {
+  return text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean);
+}
+
+function similarity(a, b) {
+  const setA = new Set(tokenise(a));
+  const setB = new Set(tokenise(b));
+  const inter = new Set([...setA].filter(x => setB.has(x)));
+  const union = new Set([...setA, ...setB]);
+  return union.size === 0 ? 0 : inter.size / union.size;
+}
+
+export function findNearDuplicate(subject, description, existingTickets) {
+  const newText = `${subject} ${description}`;
+  for (const ticket of existingTickets) {
+    if (similarity(newText, `${ticket.subject} ${ticket.description}`) >= 0.70) {
+      console.log(`[classifier] Cache hit — reusing ticket ${ticket.id}`);
+      return ticket;
+    }
+  }
+  return null;
+}
+
+// ─── Step 3: Vertex AI via @google/genai ─────────────────────────────────────
+
+function buildClient() {
+  const { ai, error } = buildGoogleAIClient();
+  if (!ai) {
+    console.warn(`[classifier] Vertex AI client not configured: ${error}`);
+  }
+  return ai;
+}
+
+async function callVertexAI(subject, description, hintCategory = null, hintTeam = null) {
+  const ai = buildClient();
+  if (!ai) {
+    console.warn('[classifier] Vertex AI client not configured');
+    return null;
+  }
+
+  try {
+    const hint = hintCategory
+      ? `\nOur rule-based classifier is HIGHLY confident this is "${hintCategory}" → "${hintTeam}". Agree unless clearly wrong.`
+      : '';
+
+    const prompt = `You are a support ticket classifier for a B2B software company.
+
+Team responsibilities:
+- Development: bugs, UI errors, crashes, pages not loading/showing, feature requests, anything technical
+- Billing: ONLY actual payment problems (wrong charges, refunds, payment failures, billing disputes)
+- HR: leave requests, payroll/salary issues, HR policies, employee contracts, benefits
+- Support: general how-to, password reset, account access, documentation
+
+Critical rules:
+1. "Invoice not showing in dashboard" = Development (UI/display bug, NOT a Billing issue)
+2. "Charged twice / wrong charge / refund" = Billing (actual money problem)
+3. Any crash, error, blank screen, missing data = Development${hint}
+
+Return valid JSON matching this exact schema:
+{
+  "category": one of [${CATEGORIES.map(c => `"${c}"`).join(', ')}],
+  "priority": one of [${PRIORITIES.map(p => `"${p}"`).join(', ')}],
+  "assignedTeam": one of [${TEAMS.map(t => `"${t}"`).join(', ')}],
+  "draftResponse": "professional 2-3 sentence empathetic response to the client"
+}
+
+Subject: ${subject}
+Description: ${description}`;
+
+    const response = await ai.models.generateContent({
+      model:    'gemini-3.5-flash',
+      contents: prompt,
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: 'object',
+          properties: {
+            category:      { type: 'string', enum: CATEGORIES },
+            priority:      { type: 'string', enum: PRIORITIES },
+            assignedTeam:  { type: 'string', enum: TEAMS },
+            draftResponse: { type: 'string' },
+          },
+          required: ['category', 'priority', 'assignedTeam', 'draftResponse'],
+        },
+        temperature: 0.1,
+      },
+    });
+
+    const text   = response.text;
+    const parsed = JSON.parse(text);
+
+    console.log(`[classifier] Vertex AI → ${parsed.category}/${parsed.assignedTeam} pri=${parsed.priority}`);
+
+    return {
+      category:      CATEGORIES.includes(parsed.category)     ? parsed.category     : 'Other',
+      assignedTeam:  TEAMS.includes(parsed.assignedTeam)       ? parsed.assignedTeam : 'Support',
+      priority:      PRIORITIES.includes(parsed.priority)      ? parsed.priority     : 'Medium',
+      draftResponse: parsed.draftResponse || '',
+    };
+  } catch (err) {
+    console.error('[classifier] Vertex AI error:', err.message);
+    return null;
+  }
+}
+
+// ─── Fallback Draft ───────────────────────────────────────────────────────────
+
+function fallbackDraft(category, subject) {
+  const drafts = {
+    Billing:           `Thank you for reaching out about a billing concern. Our billing team will review your account and respond within 1–2 business days.`,
+    Bug:               `Thank you for reporting this issue with "${subject}". Our development team has been notified and will investigate promptly.`,
+    'Feature Request': `Thank you for your suggestion regarding "${subject}". We've logged it for our product team to evaluate.`,
+    HR:                `Thank you for contacting HR about "${subject}". Our HR team will respond within 1 business day.`,
+    Other:             `Thank you for contacting support. A team member will review "${subject}" and respond within 24–48 hours.`,
+  };
+  return drafts[category] || drafts.Other;
+}
+
+// ─── Main Entry Point ─────────────────────────────────────────────────────────
+
+export async function classifyTicket(subject, description, existingTickets = []) {
+
+  // Step 2: Cache check
+  const cached = findNearDuplicate(subject, description, existingTickets);
+  if (cached) {
+    return {
+      category:      cached.category,
+      assignedTeam:  cached.assignedTeams?.[0] || cached.assignedTeam || 'Support',
+      assignedTeams: cached.assignedTeams || [cached.assignedTeam || 'Support'],
+      priority:      cached.priority,
+      draftResponse: cached.draftResponse || fallbackDraft(cached.category, subject),
+      source:        'cache',
+    };
+  }
+
+  // Step 1: Custom classifier
+  const custom = customClassify(subject, description);
+  const needsFullClassification = custom.confidence < HIGH_CONFIDENCE_THRESHOLD;
+
+  console.log(needsFullClassification
+    ? `[classifier] Low confidence (${custom.confidence.toFixed(2)}) — Vertex AI: full classification`
+    : `[classifier] High confidence (${custom.confidence.toFixed(2)}) — Vertex AI: draft only`
+  );
+
+  // Step 3: Call Vertex AI
+  const aiResult = await callVertexAI(
+    subject, description,
+    needsFullClassification ? null : custom.category,
+    needsFullClassification ? null : custom.team,
+  );
+
+  if (aiResult) {
+    if (needsFullClassification) {
+      return {
+        category:      aiResult.category,
+        assignedTeam:  aiResult.assignedTeam,
+        assignedTeams: [aiResult.assignedTeam],
+        priority:      aiResult.priority,
+        draftResponse: aiResult.draftResponse,
+        source:        'vertex-ai',
+      };
+    }
+    return {
+      category:      custom.category,
+      assignedTeam:  custom.team,
+      assignedTeams: [custom.team],
+      priority:      custom.priority,
+      draftResponse: aiResult.draftResponse,
+      source:        'custom+vertex-draft',
+    };
+  }
+
+  // Step 4: Fallback
+  console.warn('[classifier] Vertex AI unavailable — custom classification + fallback draft');
+  return {
+    category:      custom.category,
+    assignedTeam:  custom.team,
+    assignedTeams: [custom.team],
+    priority:      custom.priority,
+    draftResponse: fallbackDraft(custom.category, subject),
+    source:        'custom-fallback',
+  };
+}
+</file>
+
 <file path="next.config.js">
 /** @type {import('next').NextConfig} */
 const nextConfig = {
@@ -4406,6 +4410,8 @@ export async function sendTicketResolvedClient(ticket) {
 export async function sendTicketResolvedAdmin(ticket, actor) {
   const adminEmail = process.env.ADMIN_EMAIL;
   if (!adminEmail) return;
+  // Skip if the resolver is the admin themselves — they get the resolver email instead
+  if (actor?.email && actor.email.toLowerCase() === adminEmail.toLowerCase()) return;
   await send({
     to:      adminEmail,
     subject: `[HelpDesk] Ticket resolved by ${actor.name} — ${ticket.subject}`,
@@ -4427,6 +4433,42 @@ export async function sendTicketResolvedAdmin(ticket, actor) {
               <td style="font-family:monospace;font-size:12px;color:#475569;">${ticket.id}</td></tr>
         </table>
       </div>
+    `),
+  });
+}
+
+// ─── Template 4b: Ticket Resolved — Resolver (actor confirmation) ────────────
+
+export async function sendTicketResolvedResolver(ticket, actor) {
+  if (!actor?.email) return;
+  await send({
+    to:      actor.email,
+    subject: `[HelpDesk] You resolved ticket — ${ticket.subject}`,
+    html: base(`
+      <h2 style="color:#1e293b;font-size:18px;margin:0 0 8px;">Ticket resolved by you ✅</h2>
+      <p style="color:#475569;margin:0 0 20px;">
+        You marked the following ticket as <strong>Resolved</strong>.
+        The client has been notified.
+      </p>
+
+      <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:16px;margin-bottom:20px;">
+        <table style="width:100%;border-collapse:collapse;font-size:14px;">
+          <tr><td style="color:#94a3b8;padding:4px 0;width:110px;">Subject</td>
+              <td style="color:#1e293b;font-weight:600;">${ticket.subject}</td></tr>
+          <tr><td style="color:#94a3b8;padding:4px 0;">Category</td>
+              <td>${pill(ticket.category, { bg: '#ede9fe', text: '#6d28d9' })}</td></tr>
+          <tr><td style="color:#94a3b8;padding:4px 0;">Priority</td>
+              <td>${pill(ticket.priority, priorityColor(ticket.priority))}</td></tr>
+          <tr><td style="color:#94a3b8;padding:4px 0;">Client Email</td>
+              <td style="color:#1e293b;">${ticket.clientEmail || 'Not provided'}</td></tr>
+          <tr><td style="color:#94a3b8;padding:4px 0;">Ticket ID</td>
+              <td style="font-family:monospace;font-size:12px;color:#475569;">${ticket.id}</td></tr>
+        </table>
+      </div>
+
+      <p style="color:#64748b;font-size:13px;margin:0;">
+        If the client responds or reopens the ticket, you will be notified.
+      </p>
     `),
   });
 }
@@ -4869,8 +4911,10 @@ export async function POST(request) {
 
     // ── Send emails (non-blocking — failures won't break the response) ────────
     const emailClient = clientEmail?.trim().toLowerCase() || null;
-    sendTicketCreatedClient(ticket, emailClient);
-    sendTicketCreatedAdmin(ticket, emailClient);
+    await Promise.allSettled([
+      sendTicketCreatedClient(ticket, emailClient),
+      sendTicketCreatedAdmin(ticket, emailClient),
+    ]);
 
     return NextResponse.json(
       {
@@ -6704,46 +6748,6 @@ export const ACTIONS = {
 };
 </file>
 
-<file path="package.json">
-{
-  "name": "helpdesk",
-  "version": "1.0.0",
-  "description": "AI-powered Support Helpdesk built with Next.js",
-  "main": "index.js",
-  "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "postinstall": "prisma generate",
-    "db:generate": "prisma generate",
-    "db:migrate": "prisma migrate dev",
-    "db:seed": "node prisma/seed.js",
-    "db:studio": "prisma studio"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "dependencies": {
-    "@google/genai": "^1.3.0",
-    "@prisma/client": "5.22.0",
-    "autoprefixer": "^10.4.0",
-    "bcryptjs": "^2.4.3",
-    "jose": "^5.9.6",
-    "jsonwebtoken": "^9.0.2",
-    "next": "^15.0.0",
-    "next-auth": "4.24.11",
-    "nodemailer": "6.9.16",
-    "postcss": "^8.4.0",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "tailwindcss": "^3.4.0"
-  },
-  "devDependencies": {
-    "prisma": "5.22.0"
-  }
-}
-</file>
-
 <file path="app/admin/page.jsx">
 'use client';
 
@@ -7263,6 +7267,46 @@ export default function ActivityTimeline({
 }
 </file>
 
+<file path="package.json">
+{
+  "name": "helpdesk",
+  "version": "1.0.0",
+  "description": "AI-powered Support Helpdesk built with Next.js",
+  "main": "index.js",
+  "scripts": {
+    "dev": "next dev",
+    "build": "prisma generate && next build",
+    "start": "next start",
+    "postinstall": "prisma generate",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:seed": "node prisma/seed.js",
+    "db:studio": "prisma studio"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@google/genai": "^1.3.0",
+    "@prisma/client": "5.22.0",
+    "autoprefixer": "^10.4.0",
+    "bcryptjs": "^2.4.3",
+    "jose": "^5.9.6",
+    "jsonwebtoken": "^9.0.2",
+    "next": "^15.0.0",
+    "next-auth": "4.24.11",
+    "nodemailer": "6.9.16",
+    "postcss": "^8.4.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "tailwindcss": "^3.4.0"
+  },
+  "devDependencies": {
+    "prisma": "5.22.0"
+  }
+}
+</file>
+
 <file path="app/api/tickets/[id]/route.js">
 /**
  * /api/tickets/[id]
@@ -7278,6 +7322,7 @@ import { logActivity, buildDetail, ACTIONS } from '../../../../lib/activity';
 import {
   sendTicketResolvedClient,
   sendTicketResolvedAdmin,
+  sendTicketResolvedResolver,
   sendChangeNotificationActor,
 } from '../../../../lib/mailer';
 
@@ -7426,13 +7471,18 @@ export async function PATCH(request, { params }) {
     }
 
     if (changes.length > 0) {
-      // Always notify the actor about what they changed
-      sendChangeNotificationActor(updated, user, changes);
+      const isResolving = status === 'Resolved' && ticket.status !== 'Resolved';
 
-      // If ticket just became Resolved — notify client + admin
-      if (status === 'Resolved' && ticket.status !== 'Resolved') {
-        sendTicketResolvedClient(updated);
-        sendTicketResolvedAdmin(updated, user);
+      if (isResolving) {
+        // Req 3: ticket resolved → client + admin + resolver all get emails
+        await Promise.allSettled([
+          sendTicketResolvedClient(updated),
+          sendTicketResolvedAdmin(updated, user),
+          sendTicketResolvedResolver(updated, user),
+        ]);
+      } else {
+        // Req 2: non-resolve change → only the actor gets a confirmation
+        await sendChangeNotificationActor(updated, user, changes);
       }
     }
 

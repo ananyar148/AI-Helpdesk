@@ -190,9 +190,11 @@ export async function POST(request) {
       });
     }
 
-    // Send emails (non-blocking)
-    sendTicketCreatedClient(ticket, normalEmail);
-    sendTicketCreatedAdmin(ticket, normalEmail);
+    // Send emails
+    await Promise.allSettled([
+      sendTicketCreatedClient(ticket, normalEmail),
+      sendTicketCreatedAdmin(ticket, normalEmail),
+    ]);
 
     return NextResponse.json({ success: true, ticket, message: 'Your ticket has been submitted.' }, { status: 201 });
   } catch (err) {
