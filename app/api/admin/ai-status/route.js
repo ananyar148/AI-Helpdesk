@@ -26,7 +26,7 @@ export async function GET(request) {
   try {
     const start    = Date.now();
     const response = await ai.models.generateContent({
-      model:    'gemini-2.0-flash',
+      model:    'gemini-3.5-flash',
       contents: 'Reply with exactly one word: ok',
       config:   { temperature: 0 },
     });
@@ -36,7 +36,7 @@ export async function GET(request) {
     return NextResponse.json({
       status:    'connected',
       message:   'Vertex AI is working correctly.',
-      model:     'gemini-2.0-flash',
+      model:     'gemini-3.5-flash',
       project,
       location,
       latencyMs: ms,
