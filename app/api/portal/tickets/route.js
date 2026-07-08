@@ -191,12 +191,17 @@ export async function POST(request) {
     }
 
     // Send emails
-    await Promise.allSettled([
+    const [clientEmailResult, adminEmailResult] = await Promise.allSettled([
       sendTicketCreatedClient(ticket, normalEmail),
       sendTicketCreatedAdmin(ticket, normalEmail),
     ]);
 
-    return NextResponse.json({ success: true, ticket, message: 'Your ticket has been submitted.' }, { status: 201 });
+    const emailStatus = {
+      clientEmailSent: clientEmailResult.status === 'fulfilled' && clientEmailResult.value?.sent === true,
+      adminEmailSent:  adminEmailResult.status === 'fulfilled'  && adminEmailResult.value?.sent  === true,
+    };
+
+    return NextResponse.json({ success: true, ticket, message: 'Your ticket has been submitted.', emailStatus }, { status: 201 });
   } catch (err) {
     console.error('POST /api/portal/tickets error:', err);
     return NextResponse.json({ error: 'An unexpected error occurred.' }, { status: 500 });

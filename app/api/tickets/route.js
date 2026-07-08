@@ -151,12 +151,15 @@ export async function POST(request) {
 
     // ── Send emails (non-blocking — failures won't break the response) ────────
     const emailClient = clientEmail?.trim().toLowerCase() || null;
-    console.log(`[tickets route] About to send creation emails | ticketId: ${ticket.id} | emailClient: ${emailClient ?? 'none'} | ADMIN_EMAIL set: ${!!process.env.ADMIN_EMAIL} | SMTP_USER set: ${!!process.env.SMTP_USER}`);
-    await Promise.allSettled([
+    const [clientEmailResult, adminEmailResult] = await Promise.allSettled([
       sendTicketCreatedClient(ticket, emailClient),
       sendTicketCreatedAdmin(ticket, emailClient),
     ]);
-    console.log(`[tickets route] Creation emails settled`);
+
+    const emailStatus = {
+      clientEmailSent: clientEmailResult.status === 'fulfilled' && clientEmailResult.value?.sent === true,
+      adminEmailSent:  adminEmailResult.status === 'fulfilled'  && adminEmailResult.value?.sent  === true,
+    };
 
     return NextResponse.json(
       {
@@ -164,6 +167,7 @@ export async function POST(request) {
         ticket,
         classificationSource: classification.source,
         message:              'Your ticket has been submitted successfully.',
+        emailStatus,
       },
       { status: 201 }
     );

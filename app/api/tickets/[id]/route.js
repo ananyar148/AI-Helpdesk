@@ -162,7 +162,6 @@ export async function PATCH(request, { params }) {
 
     if (changes.length > 0) {
       const isResolving = status === 'Resolved' && ticket.status !== 'Resolved';
-      console.log(`[tickets/[id] route] Sending email | ticketId: ${id} | isResolving: ${isResolving} | changes: ${changes.map(c => c.label).join(', ')} | actor: ${user?.email}`);
 
       if (isResolving) {
         // Req 3: ticket resolved → client + admin + resolver all get emails

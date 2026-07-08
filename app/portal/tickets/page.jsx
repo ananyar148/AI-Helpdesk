@@ -105,7 +105,7 @@ function TicketForm({ clientEmail, onSuccess, parentTicket = null, onCancel }) {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Submission failed');
-      onSuccess(data.ticket);
+      onSuccess(data.ticket, data.emailStatus);
     } catch (err) { setError(err.message); setPhase('idle'); }
   };
 
@@ -371,6 +371,7 @@ function EmailTicketsPageInner() {
   const [error,        setError]        = useState('');
   const [showForm,     setShowForm]     = useState(false);
   const [statusFilter, setStatusFilter] = useState('All');
+  const [emailToast,   setEmailToast]   = useState(null); // { sent: bool } | null
 
   useEffect(() => {
     if (!email) { router.replace('/portal'); return; }
@@ -394,7 +395,14 @@ function EmailTicketsPageInner() {
 
   useEffect(() => { fetchTickets(); }, [fetchTickets]);
 
-  const handleNewTicket   = (ticket) => { setTickets(p => [ticket, ...p]); setShowForm(false); };
+  const handleNewTicket   = (ticket, emailStatus) => {
+    setTickets(p => [ticket, ...p]);
+    setShowForm(false);
+    if (emailStatus) {
+      setEmailToast({ sent: emailStatus.clientEmailSent });
+      setTimeout(() => setEmailToast(null), 5000);
+    }
+  };
 
   const filtered = statusFilter === 'All' ? tickets : tickets.filter(t => t.status === statusFilter);
   const counts   = {
@@ -435,6 +443,34 @@ function EmailTicketsPageInner() {
       </header>
 
       <main className="max-w-4xl mx-auto px-4 py-8">
+        {/* Email notification toast */}
+        {emailToast !== null && (
+          <div className={`fixed top-4 right-4 z-50 flex items-start gap-3 px-4 py-3 rounded-xl shadow-lg border text-sm max-w-sm transition-all
+            ${emailToast.sent
+              ? 'bg-green-50 border-green-200 text-green-800'
+              : 'bg-amber-50 border-amber-200 text-amber-800'}`}>
+            <span className="text-lg leading-none mt-0.5">
+              {emailToast.sent ? '✉️' : '⚠️'}
+            </span>
+            <div className="flex-1">
+              <p className="font-semibold leading-snug">
+                {emailToast.sent ? 'Confirmation email sent' : 'Email not sent'}
+              </p>
+              <p className="text-xs mt-0.5 opacity-80">
+                {emailToast.sent
+                  ? `A confirmation was sent to ${email}`
+                  : 'Your ticket was created, but the confirmation email could not be delivered. Check your spam folder or contact support.'}
+              </p>
+            </div>
+            <button onClick={() => setEmailToast(null)}
+              className="text-current opacity-50 hover:opacity-100 transition-opacity ml-1 mt-0.5"
+              aria-label="Dismiss">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/>
+              </svg>
+            </button>
+          </div>
+        )}
         {/* Header row */}
         <div className="flex items-center justify-between mb-6 gap-4 flex-wrap">
           <div>

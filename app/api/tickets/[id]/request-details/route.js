@@ -46,9 +46,7 @@ export async function POST(request, { params }) {
     }
 
     // Send email
-    console.log(`[request-details route] About to call sendDetailsRequestedClient | ticketId: ${id} | clientEmail: ${clientEmail} | actor: ${user?.email}`);
     await sendDetailsRequestedClient(ticket, clientEmail, message, user);
-    console.log(`[request-details route] sendDetailsRequestedClient returned`);
 
     // Log the activity
     const activity = await logActivity({
