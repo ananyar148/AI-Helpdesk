@@ -39,15 +39,15 @@ function formatTime(dateStr) {
 function actorLine(entry) {
   if (entry._type === 'worklog') {
     const parts = [entry.userName];
-    if (entry.team)     parts.push(`${entry.team} team`);
-    else if (entry.userRole) parts.push(entry.userRole);
-    return parts.join(' · ');
+    if (entry.team)           parts.push(entry.team);
+    if (entry.userRole)       parts.push(entry.userRole);
+    return { name: entry.userName, context: parts.slice(1).join(' · '), role: entry.userRole };
   }
-  if (!entry.userName) return 'System / AI';
-  const parts = [entry.userName];
-  if (entry.userTeam)       parts.push(`${entry.userTeam} team`);
-  else if (entry.userRole)  parts.push(entry.userRole);
-  return parts.join(' · ');
+  if (!entry.userName) return { name: null, context: 'System / AI', role: null };
+  const parts = [];
+  if (entry.userTeam) parts.push(entry.userTeam);
+  if (entry.userRole) parts.push(entry.userRole);
+  return { name: entry.userName, context: parts.join(' · '), role: entry.userRole };
 }
 
 export default function ActivityTimeline({
@@ -202,17 +202,27 @@ export default function ActivityTimeline({
                         )}
 
                         {/* Attribution */}
-                        <p className="text-xs text-gray-400 mt-1 flex items-center gap-1">
-                          {(isWorklog ? entry.userName : entry.userName) ? (
-                            <>
-                              <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-blue-100 text-blue-700 text-xs font-bold flex-shrink-0">
-                                {(isWorklog ? entry.userName : entry.userName).charAt(0).toUpperCase()}
-                              </span>
-                              <span className="font-medium text-gray-500">{actorLine(entry)}</span>
-                            </>
-                          ) : (
-                            <span className="italic">System / AI</span>
-                          )}
+                        <p className="text-xs mt-1 flex items-center gap-1.5 flex-wrap">
+                          {(() => {
+                            const actor = actorLine(entry);
+                            if (!actor.name) return <span className="italic text-gray-400">System / AI</span>;
+                            const isAdmin = actor.role === 'Admin';
+                            const avatarColor = isAdmin ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700';
+                            const badgeColor  = isAdmin ? 'bg-purple-50 text-purple-600' : 'bg-blue-50 text-blue-600';
+                            return (
+                              <>
+                                <span className={`inline-flex items-center justify-center w-4 h-4 rounded-full text-xs font-bold flex-shrink-0 ${avatarColor}`}>
+                                  {actor.name.charAt(0).toUpperCase()}
+                                </span>
+                                <span className="font-medium text-gray-600">{actor.name}</span>
+                                {actor.context && (
+                                  <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${badgeColor}`}>
+                                    {actor.context}
+                                  </span>
+                                )}
+                              </>
+                            );
+                          })()}
                         </p>
                       </div>
                     </div>
