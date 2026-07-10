@@ -14,6 +14,7 @@ import {
   sendTicketCreatedClient,
   sendTicketCreatedAdmin,
 } from '../../../lib/mailer';
+import { nextTicketNumber } from '../../../lib/ticketNumber';
 
 // POST /api/tickets — public ticket submission
 export async function POST(request) {
@@ -109,12 +110,16 @@ export async function POST(request) {
     const assignedTeams = classification.assignedTeams
       ?? (classification.assignedTeam ? [classification.assignedTeam] : ['Support']);
 
+    // All tickets via this route are root tickets — assign a number
+    const ticketNumber = await nextTicketNumber();
+
     // ── Create ticket ─────────────────────────────────────────────────────────
     const ticket = await prisma.ticket.create({
       data: {
         subject:         subject.trim(),
         description:     description.trim(),
         clientEmail:     clientEmail ? clientEmail.trim().toLowerCase() : null,
+        ticketNumber,
         category:        classification.category,
         assignedTeams,
         priority:        classification.priority,
@@ -123,6 +128,8 @@ export async function POST(request) {
         isDuplicate:     forceCreate && !!duplicateOfId,
         duplicateOfId:   forceCreate && duplicateOfId ? duplicateOfId : null,
         similarityScore: forceCreate && similarityScore ? similarityScore / 100 : null,
+        classificationSource: classification.source || null,
+        confidenceScore:      classification.confidenceScore ?? null,
       },
     });
 

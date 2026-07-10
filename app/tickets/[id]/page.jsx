@@ -247,7 +247,9 @@ export default function TicketDetailPage() {
             {user.role === 'Admin' ? 'Admin Dashboard' : 'My Dashboard'}
           </Link>
           <span>/</span>
-          <span className="text-gray-800 font-medium truncate max-w-[220px]">{ticket?.subject}</span>
+          <span className="text-gray-800 font-medium truncate max-w-[220px]">
+            #{String(ticket?.ticketNumber ?? '').padStart(3, '0')} · {ticket?.subject}
+          </span>
         </div>
 
         {/* Alerts */}
@@ -271,6 +273,9 @@ export default function TicketDetailPage() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap mb-1">
                     <h1 className="text-xl font-bold text-gray-900">{ticket.subject}</h1>
+                    <span className="font-mono text-sm font-semibold text-gray-400">
+                      #{String(ticket.ticketNumber ?? '').padStart(3, '0')}
+                    </span>
                     {ticket.isDuplicate && (
                       <span className="badge bg-pink-100 text-pink-700 flex items-center gap-1">
                         🔁 Duplicate
@@ -459,8 +464,6 @@ export default function TicketDetailPage() {
 
             {/* Meta */}
             <div className="card bg-gray-50 border-gray-200 text-xs text-gray-500 space-y-1.5">
-              <p><span className="font-medium text-gray-600">ID:</span>{' '}
-                <span className="font-mono break-all">{ticket.id}</span></p>
               <p><span className="font-medium text-gray-600">Category:</span> {ticket.category}</p>
               {ticket.clientEmail && (
                 <p><span className="font-medium text-gray-600">Client:</span>{' '}
@@ -473,6 +476,63 @@ export default function TicketDetailPage() {
               </div>
               {ticket.isDuplicate && (
                 <p className="text-pink-600 font-medium">⚠ Marked as duplicate</p>
+              )}
+
+              {/* Classification metadata */}
+              {ticket.classificationSource && (
+                <div className="pt-1.5 mt-1.5 border-t border-gray-200 space-y-1.5">
+                  <p className="font-medium text-gray-600 uppercase tracking-wide text-xs">Classification</p>
+
+                  {/* Source badge */}
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="font-medium text-gray-600">Source:</span>
+                    {(() => {
+                      const src = ticket.classificationSource;
+                      const cfg = {
+                        'vertex-ai':          { label: '🤖 Vertex AI',        color: 'bg-indigo-100 text-indigo-700' },
+                        'custom+vertex-draft':{ label: '⚡ Custom + AI Draft', color: 'bg-blue-100 text-blue-700'   },
+                        'custom-fallback':    { label: '📐 Rule-based',        color: 'bg-gray-100 text-gray-600'   },
+                        'cache':              { label: '🗄️ Cached',             color: 'bg-teal-100 text-teal-700'  },
+                      }[src] || { label: src, color: 'bg-gray-100 text-gray-600' };
+                      return (
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${cfg.color}`}>
+                          {cfg.label}
+                        </span>
+                      );
+                    })()}
+                  </div>
+
+                  {/* Confidence bar */}
+                  {ticket.confidenceScore != null && (
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="font-medium text-gray-600">Confidence:</span>
+                        <span className={`font-semibold text-xs ${
+                          ticket.confidenceScore >= 0.7  ? 'text-green-600' :
+                          ticket.confidenceScore >= 0.4  ? 'text-amber-600' : 'text-red-500'
+                        }`}>
+                          {Math.round(ticket.confidenceScore * 100)}%
+                        </span>
+                      </div>
+                      <div className="w-full bg-gray-200 rounded-full h-1.5 overflow-hidden">
+                        <div
+                          className={`h-1.5 rounded-full transition-all ${
+                            ticket.confidenceScore >= 0.7  ? 'bg-green-500' :
+                            ticket.confidenceScore >= 0.4  ? 'bg-amber-400' : 'bg-red-400'
+                          }`}
+                          style={{ width: `${Math.round(ticket.confidenceScore * 100)}%` }}
+                        />
+                      </div>
+                      <p className="text-gray-400 mt-1">
+                        {ticket.confidenceScore >= 0.7
+                          ? 'High — rule-based classifier was confident'
+                          : ticket.confidenceScore >= 0.4
+                          ? 'Medium — AI used for full classification'
+                          : 'Low — AI used for full classification'}
+                      </p>
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           </div>

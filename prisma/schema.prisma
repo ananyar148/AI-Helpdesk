@@ -13,6 +13,7 @@ datasource db {
 // ─── Ticket ──────────────────────────────────────────────────────────────────
 model Ticket {
   id            String           @id @default(cuid())
+  ticketNumber  Int?             @unique
   subject       String
   description   String           @db.Text
 
@@ -21,6 +22,10 @@ model Ticket {
   assignedTeams String[]         @default(["Support"])
   priority      String           @default("Medium")
   draftResponse String?          @db.Text
+
+  // Classification metadata — visible to admin/team
+  classificationSource  String?   // 'custom+vertex-draft' | 'vertex-ai' | 'custom-fallback' | 'cache'
+  confidenceScore       Float?    // 0.0–1.0 from custom rule-based classifier
 
   // Workflow
   status        String           @default("Open")        // Open | In Progress | Resolved
@@ -116,6 +121,7 @@ model User {
   password  String
   role      String   @default("TeamMember")
   team      String?
+  isActive  Boolean  @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -123,14 +129,15 @@ model User {
   @@map("users")
 }
 
-// ─── Client User (Google OAuth) ───────────────────────────────────────────────
-// Clients who sign in via Google to the client portal
+// ─── Client User (Google OAuth + Email/Password) ─────────────────────────────
+// Clients who access the portal — either via Google or email+password
 model ClientUser {
   id            String    @id @default(cuid())
-  googleId      String    @unique   // Google's sub identifier
+  googleId      String?   @unique   // Google's sub identifier (null for email/password users)
   email         String    @unique
   name          String
   picture       String?             // Google profile picture URL
+  passwordHash  String?             // bcrypt hash (null for Google-only users)
 
   tickets       Ticket[]
 

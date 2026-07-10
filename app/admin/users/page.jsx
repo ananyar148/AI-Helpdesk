@@ -2,8 +2,9 @@
 
 /**
  * Admin User Management — /admin/users
- * Create team members with unique name, email, password, role, and team.
- * Admins can also edit existing users' name/team/role and delete accounts.
+ * Create team members with name, email, password, role, and team.
+ * Admins can edit accounts and toggle Active / Inactive.
+ * Users are never deleted — deactivated users cannot log in.
  */
 
 import { useState, useEffect } from 'react';
@@ -29,7 +30,7 @@ export default function UsersPage() {
   const [success,    setSuccess]    = useState('');
   const [showForm,   setShowForm]   = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [deletingId, setDeletingId] = useState(null);
+  const [togglingId, setTogglingId] = useState(null);
 
   // Inline edit state
   const [editingId, setEditingId] = useState(null);
@@ -42,7 +43,7 @@ export default function UsersPage() {
   });
   const [showPassword, setShowPassword] = useState(false);
 
-  // Auth check
+  // Auth check — Admin only
   useEffect(() => {
     fetch('/api/team-auth/me')
       .then((r) => r.ok ? r.json() : Promise.reject())
@@ -117,26 +118,33 @@ export default function UsersPage() {
     }
   };
 
-  // ── Delete ───────────────────────────────────────────────────────────────
-  const handleDelete = async (userId, userName) => {
-    if (!confirm(`Delete user "${userName}"? This cannot be undone.`)) return;
-    setDeletingId(userId);
+  // ── Toggle Active / Inactive ──────────────────────────────────────────────
+  const handleToggleActive = async (u) => {
+    const next  = !u.isActive;
+    const label = next ? 'Activate' : 'Deactivate';
+    if (!confirm(`${label} "${u.name}"?`)) return;
+    setTogglingId(u.id);
     setError('');
     try {
-      const res  = await fetch(`/api/users/${userId}`, { method: 'DELETE' });
+      const res  = await fetch(`/api/users/${u.id}`, {
+        method:  'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ isActive: next }),
+      });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Delete failed');
-      setUsers((prev) => prev.filter((u) => u.id !== userId));
-      setSuccess(`User "${userName}" deleted.`);
+      if (!res.ok) throw new Error(data.error || 'Failed to update');
+      setUsers((prev) => prev.map((m) => m.id === u.id ? { ...m, isActive: next } : m));
+      setSuccess(`"${u.name}" has been ${next ? 'activated' : 'deactivated'}.`);
     } catch (err) {
       setError(err.message);
     } finally {
-      setDeletingId(null);
+      setTogglingId(null);
     }
   };
 
+  // Team counts show only active members
   const teamCounts = TEAM_OPTIONS.reduce((acc, t) => {
-    acc[t] = users.filter((u) => u.team === t).length;
+    acc[t] = users.filter((u) => u.team === t && u.isActive).length;
     return acc;
   }, {});
 
@@ -163,14 +171,14 @@ export default function UsersPage() {
         <p className="text-sm text-gray-500 mb-6">
           Each person logs in with their own <strong>email and password</strong>.
           Their name, role, and team are stored here — not entered at login.
-          Click <strong>Edit</strong> to update any existing account.
+          Click <strong>Edit</strong> to update, or toggle <strong>Active / Inactive</strong> to control access.
         </p>
 
         {/* Alerts */}
         {error   && <div className="alert-error mb-4 text-sm">{error}</div>}
         {success && <div className="alert-success mb-4 text-sm">{success}</div>}
 
-        {/* Team breakdown */}
+        {/* Team breakdown — active members only */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
           {TEAM_OPTIONS.map((team) => (
             <div key={team} className="card py-3 px-4">
@@ -269,15 +277,16 @@ export default function UsersPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-200 text-left">
-                    {['Name', 'Email', 'Role', 'Team', 'Actions'].map((h) => (
+                    {['Name', 'Email', 'Role', 'Team', 'Status', 'Actions'].map((h) => (
                       <th key={h} className="pb-3 pr-6 text-xs font-semibold text-gray-500 uppercase tracking-wider">{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {users.map((u) => (
-                    <tr key={u.id} className="hover:bg-gray-50">
+                    <tr key={u.id} className={`transition-colors ${u.isActive ? 'hover:bg-gray-50' : 'bg-gray-50/60 opacity-60'}`}>
                       {editingId === u.id ? (
+                        /* ── Edit row ── */
                         <>
                           <td className="py-2 pr-4">
                             <input type="text" value={editForm.name}
@@ -303,6 +312,7 @@ export default function UsersPage() {
                               <span className="text-gray-400 text-xs">—</span>
                             )}
                           </td>
+                          <td className="py-2 pr-4" />
                           <td className="py-2">
                             <div className="flex items-center gap-2">
                               <button onClick={() => handleSaveEdit(u.id)} disabled={saving}
@@ -315,13 +325,17 @@ export default function UsersPage() {
                           </td>
                         </>
                       ) : (
+                        /* ── View row ── */
                         <>
                           <td className="py-3 pr-6">
                             <div className="flex items-center gap-2">
-                              <div className="w-7 h-7 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0">
+                              <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0
+                                ${u.isActive ? 'bg-blue-100 text-blue-700' : 'bg-gray-200 text-gray-400'}`}>
                                 {u.name.charAt(0).toUpperCase()}
                               </div>
-                              <span className="font-medium text-gray-900">{u.name}</span>
+                              <span className={`font-medium ${u.isActive ? 'text-gray-900' : 'text-gray-400'}`}>
+                                {u.name}
+                              </span>
                             </div>
                           </td>
                           <td className="py-3 pr-6 text-gray-500">{u.email}</td>
@@ -335,14 +349,27 @@ export default function UsersPage() {
                               ? <span className={`badge ${TEAM_COLORS[u.team] || 'bg-gray-100 text-gray-600'}`}>{u.team}</span>
                               : <span className="text-gray-400 text-xs">—</span>}
                           </td>
+                          <td className="py-3 pr-6">
+                            <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full
+                              ${u.isActive ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>
+                              <span className={`w-1.5 h-1.5 rounded-full ${u.isActive ? 'bg-green-500' : 'bg-red-400'}`} />
+                              {u.isActive ? 'Active' : 'Inactive'}
+                            </span>
+                          </td>
                           <td className="py-3">
                             <div className="flex items-center gap-3">
                               <button onClick={() => startEdit(u)}
-                                className="text-xs text-blue-600 hover:text-blue-800 hover:underline">Edit</button>
-                              <button onClick={() => handleDelete(u.id, u.name)}
-                                disabled={deletingId === u.id}
-                                className="text-xs text-red-500 hover:text-red-700 hover:underline disabled:opacity-50">
-                                {deletingId === u.id ? 'Deleting…' : 'Delete'}
+                                className="text-xs text-blue-600 hover:text-blue-800 hover:underline">
+                                Edit
+                              </button>
+                              <button
+                                onClick={() => handleToggleActive(u)}
+                                disabled={togglingId === u.id}
+                                className={`text-xs hover:underline disabled:opacity-50
+                                  ${u.isActive ? 'text-amber-600 hover:text-amber-800' : 'text-green-600 hover:text-green-800'}`}>
+                                {togglingId === u.id
+                                  ? <LoadingSpinner size="sm" />
+                                  : u.isActive ? 'Deactivate' : 'Activate'}
                               </button>
                             </div>
                           </td>
@@ -356,17 +383,18 @@ export default function UsersPage() {
           )}
         </div>
 
-        {/* How it works callout */}
+        {/* Info callout */}
         <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-xl text-sm">
           <p className="font-semibold text-blue-900 mb-1">How login works</p>
           <p className="text-xs text-blue-700 leading-relaxed">
             Users type only their <strong>email and password</strong> at login.
             Their name, role, and team live here in the database.
+            <strong> Inactive users cannot log in</strong> — their account and history are preserved.
             Every action they take — status changes, work logs, reassignments —
-            is recorded in the activity history as <strong>"Ram (Development) changed status to In Progress"</strong>.
-            They can change their own password from the Settings page after logging in.
+            is recorded as <strong>"Name (Team) changed status to In Progress"</strong>.
           </p>
         </div>
+
       </main>
     </div>
   );

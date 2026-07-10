@@ -2,35 +2,14 @@
 
 /**
  * Client Portal — /portal
- * Landing page offering two paths:
- *  1. Sign in with Google → full authenticated dashboard
- *  2. Enter email → anonymous ticket lookup (legacy / no-account path)
+ * Landing page: sign in with Google OR with email + password.
+ * New clients can create an account via /portal/signup.
  */
 
-import { useState }    from 'react';
-import { signIn }      from 'next-auth/react';
-import { useRouter }   from 'next/navigation';
-import Link            from 'next/link';
-import LoadingSpinner  from '../components/LoadingSpinner';
+import { signIn }    from 'next-auth/react';
+import Link          from 'next/link';
 
 export default function PortalPage() {
-  const router = useRouter();
-  const [email,   setEmail]   = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error,   setError]   = useState('');
-
-  const handleEmailSubmit = async (e) => {
-    e.preventDefault();
-    setError('');
-    const trimmed = email.trim().toLowerCase();
-    if (!trimmed || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
-      setError('Please enter a valid email address.');
-      return;
-    }
-    setLoading(true);
-    router.push(`/portal/tickets?email=${encodeURIComponent(trimmed)}`);
-  };
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50 flex items-center justify-center px-4 py-12">
       <div className="w-full max-w-md">
@@ -50,11 +29,11 @@ export default function PortalPage() {
           <p className="text-gray-500 text-sm mt-1">Submit tickets and track your support requests</p>
         </div>
 
-        {/* Google sign-in card (primary) */}
+        {/* Sign in with Google */}
         <div className="card shadow-md mb-4">
           <h2 className="text-sm font-semibold text-gray-700 mb-1">Sign in with Google</h2>
           <p className="text-xs text-gray-500 mb-4 leading-relaxed">
-            Get a full dashboard showing all your tickets in one place. All past tickets submitted
+            Get a full dashboard with all your tickets in one place. Past tickets submitted
             with your Google email are automatically linked to your account.
           </p>
           <button
@@ -74,38 +53,33 @@ export default function PortalPage() {
         {/* Divider */}
         <div className="flex items-center gap-3 my-4">
           <div className="flex-1 border-t border-gray-200" />
-          <span className="text-xs text-gray-400 font-medium">or look up by email</span>
+          <span className="text-xs text-gray-400 font-medium">or use email & password</span>
           <div className="flex-1 border-t border-gray-200" />
         </div>
 
-        {/* Email lookup card (secondary) */}
-        <div className="card shadow-sm">
-          <h2 className="text-sm font-semibold text-gray-700 mb-1">Email lookup</h2>
-          <p className="text-xs text-gray-500 mb-4">Enter the email you used when submitting your ticket.</p>
-
-          {error && (
-            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 flex items-center gap-2">
-              <svg className="w-4 h-4 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd"/>
-              </svg>
-              {error}
-            </div>
-          )}
-
-          <form onSubmit={handleEmailSubmit} noValidate>
-            <div className="mb-4">
-              <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">Email Address</label>
-              <input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@example.com" className="input-field" required
-                autoComplete="email" disabled={loading} />
-            </div>
-            <button type="submit" disabled={loading || !email.trim()} className="btn-primary w-full py-2.5">
-              {loading ? <><LoadingSpinner size="sm" /> Loading…</> : 'View My Tickets'}
-            </button>
-          </form>
+        {/* Email + password options */}
+        <div className="grid grid-cols-2 gap-3">
+          <Link
+            href="/portal/login"
+            className="flex items-center justify-center gap-2 px-4 py-3 border border-gray-200 rounded-xl bg-white hover:bg-gray-50 hover:border-blue-300 transition-colors text-sm font-medium text-gray-700 shadow-sm"
+          >
+            <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"/>
+            </svg>
+            Sign In
+          </Link>
+          <Link
+            href="/portal/signup"
+            className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 transition-colors text-sm font-medium text-white shadow-sm"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"/>
+            </svg>
+            Create Account
+          </Link>
         </div>
 
-        <div className="mt-6 space-y-2 text-center">
+        <div className="mt-6 text-center">
           <p className="text-sm text-gray-500">
             Team member?{' '}
             <Link href="/login" className="text-blue-600 hover:text-blue-700 font-medium">Team login →</Link>

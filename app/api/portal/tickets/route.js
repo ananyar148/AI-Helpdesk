@@ -12,9 +12,10 @@ import { classifyTicket }            from '../../../../lib/classifier';
 import { logActivity, buildDetail, ACTIONS } from '../../../../lib/activity';
 import { findBestMatch }             from '../../../../lib/duplicate';
 import { sendTicketCreatedClient, sendTicketCreatedAdmin } from '../../../../lib/mailer';
+import { nextTicketNumber } from '../../../../lib/ticketNumber';
 
 const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024; // 5 MB
-const MAX_ATTACHMENTS      = 3;
+const MAX_ATTACHMENTS      = 25;
 
 // GET /api/portal/tickets?email=...
 export async function GET(request) {
@@ -30,15 +31,15 @@ export async function GET(request) {
       where:   { clientEmail: email },
       orderBy: { createdAt: 'desc' },
       select: {
-        id: true, subject: true, description: true,
+        id: true, ticketNumber: true, subject: true, description: true,
         status: true, createdAt: true, updatedAt: true,
         parentTicketId: true, draftResponse: true,
         attachments: {
-          select: { id: true, fileName: true, mimeType: true, sizeBytes: true, createdAt: true },
+          select: { id: true, fileName: true, mimeType: true, sizeBytes: true, dataUrl: true, createdAt: true },
         },
         activities: {
-          where:   { action: 'details_requested' },
-          orderBy: { createdAt: 'desc' },
+          where:   { action: { in: ['details_requested', 'details_provided', 'follow_up_added'] } },
+          orderBy: { createdAt: 'asc' },
           select:  { id: true, action: true, detail: true, newValue: true, createdAt: true, userName: true, userTeam: true },
         },
       },
@@ -148,6 +149,9 @@ export async function POST(request) {
     const assignedTeams = classification.assignedTeams
       ?? (classification.assignedTeam ? [classification.assignedTeam] : ['Support']);
 
+    // Assign a human-readable number only to root tickets (not follow-ups)
+    const ticketNumber = parentTicketId ? null : await nextTicketNumber();
+
     // ── Create ticket ─────────────────────────────────────────────────────────
     const ticket = await prisma.ticket.create({
       data: {
@@ -156,6 +160,7 @@ export async function POST(request) {
         clientEmail:     normalEmail,
         clientUserId:    clientUserId || null,
         parentTicketId:  parentTicketId || null,
+        ticketNumber,
         category:        classification.category,
         assignedTeams,
         priority:        classification.priority,
@@ -164,6 +169,8 @@ export async function POST(request) {
         isDuplicate:     forceCreate && !!duplicateOfId,
         duplicateOfId:   forceCreate && duplicateOfId ? duplicateOfId : null,
         similarityScore: forceCreate && similarityScore ? similarityScore / 100 : null,
+        classificationSource: classification.source || null,
+        confidenceScore:      classification.confidenceScore ?? null,
         attachments: attachments.length > 0 ? {
           create: attachments.map((a) => ({
             fileName: a.fileName, mimeType: a.mimeType,
@@ -190,10 +197,10 @@ export async function POST(request) {
       });
     }
 
-    // Send emails
+    // Send emails — only for root tickets, not follow-ups
     const [clientEmailResult, adminEmailResult] = await Promise.allSettled([
-      sendTicketCreatedClient(ticket, normalEmail),
-      sendTicketCreatedAdmin(ticket, normalEmail),
+      parentTicketId ? Promise.resolve({ sent: false, reason: 'follow_up' }) : sendTicketCreatedClient(ticket, normalEmail),
+      parentTicketId ? Promise.resolve({ sent: false, reason: 'follow_up' }) : sendTicketCreatedAdmin(ticket, normalEmail),
     ]);
 
     const emailStatus = {

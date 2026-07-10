@@ -7,7 +7,6 @@
 import { NextResponse } from 'next/server';
 import prisma from '../../../../../lib/prisma';
 import { getUserFromRequest } from '../../../../../lib/auth';
-import { logActivity, buildDetail, ACTIONS } from '../../../../../lib/activity';
 
 // GET /api/tickets/[id]/work-logs
 export async function GET(request, { params }) {
@@ -71,14 +70,6 @@ export async function POST(request, { params }) {
         note:       note.trim(),
         visibility,
       },
-    });
-
-    // Rich audit detail: "Ram (Development) added a internal work log"
-    await logActivity({
-      ticketId: id,
-      action:   ACTIONS.WORK_LOG_ADDED,
-      detail:   buildDetail.workLogAdded(user, visibility),
-      actor:    user,
     });
 
     return NextResponse.json({ success: true, workLog }, { status: 201 });

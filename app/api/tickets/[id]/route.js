@@ -19,6 +19,7 @@ import {
 const VALID_TEAMS      = ['Development', 'Billing', 'HR', 'Support'];
 const VALID_STATUSES   = ['Open', 'In Progress', 'Resolved'];
 const VALID_PRIORITIES = ['Low', 'Medium', 'High'];
+const VALID_CATEGORIES = ['Bug', 'Feature Request', 'Billing', 'HR', 'Other'];
 
 /** Returns true if the user is on at least one of the ticket's assigned teams */
 function userCanAccessTicket(user, ticket) {
@@ -65,7 +66,7 @@ export async function PATCH(request, { params }) {
     if (!user) return NextResponse.json({ error: 'Unauthorized.' }, { status: 401 });
 
     const body = await request.json();
-    const { status, assignedTeams, priority } = body;
+    const { status, assignedTeams, priority, category } = body;
 
     const ticket = await prisma.ticket.findUnique({ where: { id } });
     if (!ticket) return NextResponse.json({ error: 'Ticket not found.' }, { status: 404 });
@@ -84,6 +85,8 @@ export async function PATCH(request, { params }) {
       return NextResponse.json({ error: 'Invalid status.' },   { status: 400 });
     if (priority     && !VALID_PRIORITIES.includes(priority))
       return NextResponse.json({ error: 'Invalid priority.' }, { status: 400 });
+    if (category     && !VALID_CATEGORIES.includes(category))
+      return NextResponse.json({ error: 'Invalid category.' }, { status: 400 });
     if (assignedTeams) {
       if (!Array.isArray(assignedTeams) || assignedTeams.length === 0)
         return NextResponse.json({ error: 'assignedTeams must be a non-empty array.' }, { status: 400 });
@@ -93,9 +96,10 @@ export async function PATCH(request, { params }) {
     }
 
     const updateData = {};
-    if (status)       updateData.status       = status;
+    if (status)        updateData.status        = status;
     if (assignedTeams) updateData.assignedTeams = assignedTeams;
-    if (priority)     updateData.priority     = priority;
+    if (priority)      updateData.priority      = priority;
+    if (category)      updateData.category      = category;
 
     const updated = await prisma.ticket.update({ where: { id }, data: updateData });
 
@@ -139,6 +143,17 @@ export async function PATCH(request, { params }) {
       });
     }
 
+    if (category && category !== ticket.category) {
+      await logActivity({
+        ticketId: id,
+        action:   ACTIONS.CATEGORY_CHANGED,
+        detail:   buildDetail.categoryChanged(user, ticket.category, category),
+        oldValue: ticket.category,
+        newValue: category,
+        actor:    user,
+      });
+    }
+
     // ── Email notifications ───────────────────────────────────────────────────
     // Build a list of what changed for the actor confirmation email
     const changes = [];
@@ -147,6 +162,9 @@ export async function PATCH(request, { params }) {
     }
     if (priority && priority !== ticket.priority) {
       changes.push({ label: 'Priority', from: ticket.priority, to: priority });
+    }
+    if (category && category !== ticket.category) {
+      changes.push({ label: 'Category', from: ticket.category, to: category });
     }
     if (assignedTeams) {
       const added   = assignedTeams.filter((t) => !ticket.assignedTeams.includes(t));
