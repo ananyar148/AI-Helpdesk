@@ -32,6 +32,14 @@ export async function PATCH(request, { params }) {
       return NextResponse.json({ error: 'You cannot deactivate your own account.' }, { status: 400 });
     }
 
+    // Prevent activating a user who hasn't accepted their invite yet
+    if (isActive === true) {
+      const target = await prisma.user.findUnique({ where: { id }, select: { inviteToken: true } });
+      if (target?.inviteToken) {
+        return NextResponse.json({ error: 'This user has not accepted their invite yet. They will be activated automatically when they set their password.' }, { status: 400 });
+      }
+    }
+
     const updateData = {};
     if (name !== undefined)     updateData.name     = name.trim();
     if (isActive !== undefined) updateData.isActive = isActive;
