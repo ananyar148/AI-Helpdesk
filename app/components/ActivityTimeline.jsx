@@ -47,7 +47,19 @@ function actorLine(entry) {
     if (entry.userRole) parts.push(entry.userRole);
     return { name: entry.userName, context: parts.join(' · '), role: entry.userRole };
   }
-  if (!entry.userName) return { name: null, context: '', role: null };
+  // Client-submitted actions — userName is null, extract identity from detail
+  // MUST be checked before the !userName guard below
+  if (entry.action === 'follow_up_added' || entry.action === 'details_provided') {
+    const emailMatch = entry.detail?.match(/\(([^)]+)\)/);
+    const label = emailMatch ? emailMatch[1] : 'Client';
+    return { name: label, context: 'Client', role: 'client' };
+  }
+  // System/AI actions — show a meaningful label instead of null
+  if (!entry.userName) {
+    if (entry.action === 'ai_draft_generated') return { name: null, context: '', role: null, system: '🤖 AI Classifier' };
+    if (entry.action === 'created')            return { name: null, context: '', role: null, system: 'System' };
+    return { name: null, context: '', role: null, system: 'System / AI' };
+  }
   const parts = [];
   if (entry.userTeam) parts.push(entry.userTeam);
   if (entry.userRole) parts.push(entry.userRole);
@@ -125,10 +137,21 @@ function TimelineEntry({ entry, isLast }) {
             <p className="text-xs mt-1 flex items-center gap-1.5 flex-wrap">
               {(() => {
                 const actor = actorLine(entry);
-                if (!actor.name) return <span className="italic text-gray-400">System / AI</span>;
-                const isAdmin     = actor.role === 'Admin';
-                const avatarColor = isAdmin ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700';
-                const badgeColor  = isAdmin ? 'bg-purple-50 text-purple-600'  : 'bg-blue-50 text-blue-600';
+                if (!actor.name) {
+                  return (
+                    <span className="italic text-gray-400 flex items-center gap-1">
+                      {actor.system || 'System / AI'}
+                    </span>
+                  );
+                }
+                const isAdmin  = actor.role === 'Admin';
+                const isClient = actor.role === 'client';
+                const avatarColor = isAdmin  ? 'bg-purple-100 text-purple-700'
+                                  : isClient ? 'bg-green-100 text-green-700'
+                                  :             'bg-blue-100 text-blue-700';
+                const badgeColor  = isAdmin  ? 'bg-purple-50 text-purple-600'
+                                  : isClient ? 'bg-green-50 text-green-600'
+                                  :             'bg-blue-50 text-blue-600';
                 return (
                   <>
                     <span className={`inline-flex items-center justify-center w-4 h-4 rounded-full text-xs font-bold flex-shrink-0 ${avatarColor}`}>

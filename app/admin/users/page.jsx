@@ -48,6 +48,7 @@ export default function UsersPage() {
   const [editingId,    setEditingId]    = useState(null);
   const [editForm,     setEditForm]     = useState({ name: '', team: '', role: '' });
   const [saving,       setSaving]       = useState(false);
+  const [resendingId,  setResendingId]  = useState(null);
   const [form,         setForm]         = useState({ name: '', email: '', role: 'TeamMember', team: 'Development' });
 
   useEffect(() => {
@@ -137,6 +138,18 @@ export default function UsersPage() {
       setSuccess(`"${u.name}" has been ${next ? 'activated' : 'deactivated'}.`);
     } catch (err) { setError(err.message); }
     finally { setTogglingId(null); }
+  };
+
+  const handleResendInvite = async (u) => {
+    setResendingId(u.id);
+    setError('');
+    try {
+      const res  = await fetch(`/api/users/${u.id}/resend-invite`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to resend');
+      setSuccess(`Invite resent to ${u.email}. New link valid for 48 hours.`);
+    } catch (err) { setError(err.message); }
+    finally { setResendingId(null); }
   };
 
   const teamCounts = TEAM_OPTIONS.reduce((acc, t) => {
@@ -337,6 +350,14 @@ export default function UsersPage() {
                             <div className="flex items-center gap-3">
                               <button onClick={() => startEdit(u)}
                                 className="text-xs text-blue-600 hover:text-blue-800 hover:underline">Edit</button>
+                              {u.inviteToken && (
+                                <button
+                                  onClick={() => handleResendInvite(u)}
+                                  disabled={resendingId === u.id}
+                                  className="text-xs text-indigo-600 hover:text-indigo-800 hover:underline disabled:opacity-50">
+                                  {resendingId === u.id ? <LoadingSpinner size="sm" /> : 'Resend Invite'}
+                                </button>
+                              )}
                               <button
                                 onClick={() => handleToggleActive(u)}
                                 disabled={togglingId === u.id || !!u.inviteToken}

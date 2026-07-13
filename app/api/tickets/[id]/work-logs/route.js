@@ -7,6 +7,7 @@
 import { NextResponse } from 'next/server';
 import prisma from '../../../../../lib/prisma';
 import { getUserFromRequest } from '../../../../../lib/auth';
+import { sendWorkLogAddedAdmin } from '../../../../../lib/mailer';
 
 /** Returns true if the user can access this ticket (team OR individual assignment) */
 function canAccess(user, ticket) {
@@ -83,6 +84,11 @@ export async function POST(request, { params }) {
         visibility,
       },
     });
+
+    // Notify admin (non-blocking, skips self-notification)
+    sendWorkLogAddedAdmin(ticket, workLog, user)
+      .then(r => { if (!r.sent) console.log('[work-log] Admin email skipped:', r.reason); })
+      .catch(err => console.error('[work-log] Admin email error:', err.message));
 
     return NextResponse.json({ success: true, workLog }, { status: 201 });
   } catch (err) {
