@@ -19,12 +19,14 @@ const TEAM_OPTIONS     = ['Development', 'Billing', 'HR', 'Support'];
 
 // ── Inline user assignment picker — Admin only ────────────────────────────────
 function UserPicker({ currentAssignee, ticketId, allUsers, onSaved }) {
-  const [open,   setOpen]   = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [error,  setError]  = useState('');
+  const [open,       setOpen]       = useState(false);
+  const [saving,     setSaving]     = useState(false);
+  const [savingFor,  setSavingFor]  = useState(null); // userId being saved
+  const [error,      setError]      = useState('');
 
   const assign = async (userId) => {
     setSaving(true);
+    setSavingFor(userId);
     setError('');
     try {
       const res  = await fetch(`/api/tickets/${ticketId}`, {
@@ -40,28 +42,42 @@ function UserPicker({ currentAssignee, ticketId, allUsers, onSaved }) {
       setError(err.message);
     } finally {
       setSaving(false);
+      setSavingFor(null);
     }
   };
 
-  const label = currentAssignee
-    ? <span className="flex items-center gap-1">
+  const label = saving
+    ? (
+      <span className="flex items-center gap-1.5 text-blue-600">
+        <svg className="animate-spin w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/>
+        </svg>
+        Assigning…
+      </span>
+    )
+    : currentAssignee
+    ? (
+      <span className="flex items-center gap-1">
         <span className="w-4 h-4 rounded-full bg-blue-100 text-blue-700 inline-flex items-center justify-center text-xs font-bold flex-shrink-0">
           {currentAssignee.name.charAt(0).toUpperCase()}
         </span>
         <span className="truncate max-w-[80px]">{currentAssignee.name}</span>
       </span>
+    )
     : <span className="text-gray-400">Unassigned</span>;
 
   return (
     <div className="relative">
       <button
-        onClick={(e) => { e.stopPropagation(); setOpen(!open); }}
-        className="text-xs border border-gray-200 rounded-md px-2 py-1 bg-white hover:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400 whitespace-nowrap flex items-center gap-1"
+        onClick={(e) => { e.stopPropagation(); if (!saving) setOpen(!open); }}
+        disabled={saving}
+        className="text-xs border border-gray-200 rounded-md px-2 py-1 bg-white hover:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400 whitespace-nowrap flex items-center gap-1 disabled:opacity-60 disabled:cursor-not-allowed"
       >
-        {label} ▾
+        {label} {!saving && '▾'}
       </button>
 
-      {open && (
+      {open && !saving && (
         <div
           className="absolute z-30 left-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-lg p-2 min-w-[200px] max-h-64 overflow-y-auto"
           onClick={(e) => e.stopPropagation()}
@@ -73,7 +89,10 @@ function UserPicker({ currentAssignee, ticketId, allUsers, onSaved }) {
             disabled={saving}
             className={`w-full text-left px-2 py-1.5 text-xs rounded-lg hover:bg-gray-50 flex items-center gap-2 ${!currentAssignee ? 'text-gray-400' : 'text-gray-700'}`}
           >
-            <span className="w-4 h-4 rounded-full bg-gray-100 inline-flex items-center justify-center text-gray-400 flex-shrink-0">—</span>
+            {savingFor === null && saving
+              ? <svg className="animate-spin w-3 h-3 text-blue-500" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/></svg>
+              : <span className="w-4 h-4 rounded-full bg-gray-100 inline-flex items-center justify-center text-gray-400 flex-shrink-0">—</span>
+            }
             Unassigned
           </button>
           {/* Group by team */}
@@ -95,9 +114,12 @@ function UserPicker({ currentAssignee, ticketId, allUsers, onSaved }) {
                   className={`w-full text-left px-2 py-1.5 text-xs rounded-lg hover:bg-blue-50 flex items-center gap-2
                     ${currentAssignee?.id === u.id ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-gray-700'}`}
                 >
-                  <span className="w-4 h-4 rounded-full bg-blue-100 text-blue-700 inline-flex items-center justify-center text-xs font-bold flex-shrink-0">
-                    {u.name.charAt(0).toUpperCase()}
-                  </span>
+                  {savingFor === u.id
+                    ? <svg className="animate-spin w-3 h-3 text-blue-500 flex-shrink-0" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/></svg>
+                    : <span className="w-4 h-4 rounded-full bg-blue-100 text-blue-700 inline-flex items-center justify-center text-xs font-bold flex-shrink-0">
+                        {u.name.charAt(0).toUpperCase()}
+                      </span>
+                  }
                   {u.name}
                 </button>
               ))}
@@ -215,12 +237,7 @@ export default function TicketTable({
     setOverrides((prev) => ({ ...prev, [ticketId]: { ...prev[ticketId], assignedTo: newAssignee, assignedToId: newAssignee?.id ?? null } }));
   };
 
-  const canDelete = (ticket) => {
-    if (userRole === 'Admin') return true;
-    const teams = ticket.assignedTeams ?? (ticket.assignedTeam ? [ticket.assignedTeam] : []);
-    if (userRole === 'TeamMember' && userTeam && teams.includes(userTeam)) return true;
-    return false;
-  };
+  const canDelete = (ticket) => userRole === 'Admin';
 
   const handleStatusChange = async (ticketId, newStatus, e) => {
     e.stopPropagation();

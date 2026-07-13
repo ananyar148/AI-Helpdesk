@@ -210,9 +210,12 @@ export default function TicketDetailPage() {
   const teams     = ticket?.assignedTeams || [];
   const canAccess = user && ticket && (
     user.role === 'Admin' ||
-    (user.role === 'TeamMember' && teams.includes(user.team))
+    (user.role === 'TeamMember' && (
+      teams.includes(user.team) ||          // team-based access
+      ticket.assignedToId === user.id        // individually assigned
+    ))
   );
-  const canDelete  = canAccess;
+  const canDelete  = user?.role === 'Admin';
   const canAddLog  = canAccess;
 
   const formatDate = (d) =>
@@ -299,9 +302,10 @@ export default function TicketDetailPage() {
                     </p>
                   )}
                 </div>
-                {canDelete && (
+                {(canAccess && ticket.clientEmail) || canDelete ? (
                   <div className="flex items-center gap-2 flex-shrink-0">
-                    {ticket.clientEmail && (
+                    {/* Request Details — any user who can access the ticket */}
+                    {canAccess && ticket.clientEmail && (
                       <button onClick={() => { setShowDetailsModal(true); setDetailsError(''); setDetailsSuccess(''); }}
                         className="btn-secondary text-xs px-3 py-1.5 flex items-center gap-1.5">
                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -311,16 +315,19 @@ export default function TicketDetailPage() {
                         Request Details
                       </button>
                     )}
-                    <button onClick={() => setShowDeleteConfirm(true)}
-                      className="btn-danger text-xs px-3 py-1.5 flex items-center gap-1.5" disabled={deleting}>
-                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                          d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
-                      </svg>
-                      Delete
-                    </button>
+                    {/* Delete — admin only */}
+                    {canDelete && (
+                      <button onClick={() => setShowDeleteConfirm(true)}
+                        className="btn-danger text-xs px-3 py-1.5 flex items-center gap-1.5" disabled={deleting}>
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                            d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                        </svg>
+                        Delete
+                      </button>
+                    )}
                   </div>
-                )}
+                ) : null}
               </div>
 
               <p className="text-sm text-gray-700 leading-relaxed mb-4">{ticket.description}</p>
@@ -584,22 +591,26 @@ export default function TicketDetailPage() {
                         <span className="font-medium text-gray-600">Confidence:</span>
                         <span className={`font-semibold text-xs ${
                           ticket.confidenceScore >= 0.7  ? 'text-green-600' :
-                          ticket.confidenceScore >= 0.4  ? 'text-amber-600' : 'text-red-500'
+                          ticket.confidenceScore >= 0.4  ? 'text-amber-600' : 'text-gray-400'
                         }`}>
-                          {Math.round(ticket.confidenceScore * 100)}%
+                          {ticket.confidenceScore === 0
+                            ? 'N/A'
+                            : `${Math.round(ticket.confidenceScore * 100)}%`}
                         </span>
                       </div>
                       <div className="w-full bg-gray-200 rounded-full h-1.5 overflow-hidden">
                         <div
                           className={`h-1.5 rounded-full transition-all ${
                             ticket.confidenceScore >= 0.7  ? 'bg-green-500' :
-                            ticket.confidenceScore >= 0.4  ? 'bg-amber-400' : 'bg-red-400'
+                            ticket.confidenceScore >= 0.4  ? 'bg-amber-400' : 'bg-gray-300'
                           }`}
-                          style={{ width: `${Math.round(ticket.confidenceScore * 100)}%` }}
+                          style={{ width: `${Math.max(Math.round(ticket.confidenceScore * 100), 2)}%` }}
                         />
                       </div>
                       <p className="text-gray-400 mt-1">
-                        {ticket.confidenceScore >= 0.7
+                        {ticket.confidenceScore === 0
+                          ? 'No rule matched — Vertex AI classified fully'
+                          : ticket.confidenceScore >= 0.7
                           ? 'High — rule-based classifier was confident'
                           : ticket.confidenceScore >= 0.4
                           ? 'Medium — AI used for full classification'

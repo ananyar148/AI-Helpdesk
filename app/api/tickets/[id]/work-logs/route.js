@@ -8,6 +8,17 @@ import { NextResponse } from 'next/server';
 import prisma from '../../../../../lib/prisma';
 import { getUserFromRequest } from '../../../../../lib/auth';
 
+/** Returns true if the user can access this ticket (team OR individual assignment) */
+function canAccess(user, ticket) {
+  if (!user) return false;
+  if (user.role === 'Admin') return true;
+  if (user.role === 'TeamMember') {
+    if (ticket.assignedToId && ticket.assignedToId === user.id) return true;
+    if (!ticket.assignedToId && user.team && ticket.assignedTeams.includes(user.team)) return true;
+  }
+  return false;
+}
+
 // GET /api/tickets/[id]/work-logs
 export async function GET(request, { params }) {
   try {
@@ -18,7 +29,8 @@ export async function GET(request, { params }) {
     if (!ticket) return NextResponse.json({ error: 'Ticket not found.' }, { status: 404 });
 
     const where = { ticketId: id };
-    if (!user || (user.role === 'TeamMember' && !ticket.assignedTeams.includes(user.team))) {
+    // Non-team members only see Client-visible logs
+    if (!canAccess(user, ticket)) {
       where.visibility = 'Client';
     }
 
@@ -44,7 +56,7 @@ export async function POST(request, { params }) {
     const ticket = await prisma.ticket.findUnique({ where: { id } });
     if (!ticket) return NextResponse.json({ error: 'Ticket not found.' }, { status: 404 });
 
-    if (user.role === 'TeamMember' && !ticket.assignedTeams.includes(user.team)) {
+    if (!canAccess(user, ticket)) {
       return NextResponse.json({ error: 'Access denied.' }, { status: 403 });
     }
 

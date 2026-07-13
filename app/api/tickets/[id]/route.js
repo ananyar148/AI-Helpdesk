@@ -280,6 +280,11 @@ export async function DELETE(request, { params }) {
       return NextResponse.json({ error: 'Access denied.' }, { status: 403 });
     }
 
+    // Only admins can delete tickets
+    if (user.role !== 'Admin') {
+      return NextResponse.json({ error: 'Only admins can delete tickets.' }, { status: 403 });
+    }
+
     await logActivity({
       ticketId: id,
       action:   ACTIONS.TICKET_DELETED,

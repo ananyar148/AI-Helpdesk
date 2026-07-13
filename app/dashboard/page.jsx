@@ -2,7 +2,9 @@
 
 /**
  * Team Dashboard — /dashboard
- * Protected. Shows only tickets assigned to the logged-in user's team.
+ * Tickets split into two sections:
+ *   1. Assigned to Me  — tickets where assignedToId === this user's id
+ *   2. Team Queue      — tickets on the team's queue with no individual assignee
  */
 
 import { useState, useEffect, useCallback } from 'react';
@@ -16,44 +18,30 @@ import { TeamBadge } from '../components/StatusBadge';
 
 export default function DashboardPage() {
   const router = useRouter();
-  const [user, setUser] = useState(null);
-  const [tickets, setTickets] = useState([]);
-  const [filteredTickets, setFilteredTickets] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [filters, setFilters] = useState({
-    status: '',
-    category: '',
-    priority: '',
-    team: '',
-  });
+  const [user,            setUser]            = useState(null);
+  const [tickets,         setTickets]         = useState([]);
+  const [loading,         setLoading]         = useState(true);
+  const [error,           setError]           = useState('');
+  const [filters,         setFilters]         = useState({ status: '', category: '', priority: '' });
 
   // Fetch current user
   useEffect(() => {
     fetch('/api/team-auth/me')
       .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then((data) => {
-        if (!data.user) {
-          router.push('/login');
-          return;
-        }
-        // Admins should use /admin
-        if (data.user.role === 'Admin') {
-          router.push('/admin');
-          return;
-        }
+        if (!data.user) { router.push('/login'); return; }
+        if (data.user.role === 'Admin') { router.push('/admin'); return; }
         setUser(data.user);
       })
       .catch(() => router.push('/login'));
   }, [router]);
 
-  // Fetch tickets for this team
   const fetchTickets = useCallback(async () => {
     if (!user) return;
     setLoading(true);
     setError('');
     try {
-      const res = await fetch('/api/tickets');
+      const res  = await fetch('/api/tickets');
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to load tickets');
       setTickets(data.tickets);
@@ -64,22 +52,27 @@ export default function DashboardPage() {
     }
   }, [user]);
 
-  useEffect(() => {
-    fetchTickets();
-  }, [fetchTickets]);
+  useEffect(() => { fetchTickets(); }, [fetchTickets]);
 
-  // Apply client-side filters
-  useEffect(() => {
-    let result = [...tickets];
-    if (filters.status) result = result.filter((t) => t.status === filters.status);
-    if (filters.category) result = result.filter((t) => t.category === filters.category);
-    if (filters.priority) result = result.filter((t) => t.priority === filters.priority);
-    setFilteredTickets(result);
-  }, [tickets, filters]);
+  const handleTicketDeleted = (deletedId) =>
+    setTickets((prev) => prev.filter((t) => t.id !== deletedId));
 
-  const handleFilterChange = (key, value) => {
+  const handleFilterChange = (key, value) =>
     setFilters((prev) => ({ ...prev, [key]: value }));
+
+  // ── Split tickets ──────────────────────────────────────────────────────────
+  const applyFilters = (list) => {
+    let r = [...list];
+    if (filters.status)   r = r.filter((t) => t.status   === filters.status);
+    if (filters.category) r = r.filter((t) => t.category === filters.category);
+    if (filters.priority) r = r.filter((t) => t.priority === filters.priority);
+    return r;
   };
+
+  const assignedToMe   = user ? applyFilters(tickets.filter((t) => t.assignedToId === user.id)) : [];
+  const teamQueue      = user ? applyFilters(tickets.filter((t) => !t.assignedToId)) : [];
+  const hasFilters     = !!(filters.status || filters.category || filters.priority);
+  const clearFilters   = () => setFilters({ status: '', category: '', priority: '' });
 
   if (!user) {
     return (
@@ -94,7 +87,8 @@ export default function DashboardPage() {
       <Navbar />
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Page Header */}
+
+        {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
           <div>
             <div className="flex items-center gap-3 mb-1">
@@ -103,20 +97,15 @@ export default function DashboardPage() {
             </div>
             <p className="text-gray-500 text-sm">
               Welcome back, <span className="font-medium text-gray-700">{user.name}</span>.
-              {user.team
-                ? ` Showing tickets assigned to the ${user.team} team.`
-                : ' Showing all assigned tickets.'}
+              {user.team ? ` Showing tickets for the ${user.team} team.` : ' Showing all assigned tickets.'}
             </p>
           </div>
-          <button
-            onClick={fetchTickets}
-            disabled={loading}
-            className="btn-secondary self-start sm:self-auto"
-            aria-label="Refresh tickets"
-          >
+          <button onClick={fetchTickets} disabled={loading}
+            className="btn-secondary self-start sm:self-auto" aria-label="Refresh tickets">
             {loading ? <LoadingSpinner size="sm" /> : (
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
               </svg>
             )}
             Refresh
@@ -126,7 +115,7 @@ export default function DashboardPage() {
         {error && (
           <div className="alert-error mb-6 flex items-center gap-2">
             <svg className="w-4 h-4 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd"/>
             </svg>
             {error}
             <button onClick={fetchTickets} className="ml-auto text-xs underline">Retry</button>
@@ -140,39 +129,71 @@ export default function DashboardPage() {
           </div>
         ) : (
           <>
-            {/* Stats */}
+            {/* Stats — based on all tickets this user can see */}
             <div className="mb-8">
               <StatsCards tickets={tickets} />
             </div>
 
-            {/* Filters + Table */}
-            <div className="card">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
-                <h2 className="text-lg font-semibold text-gray-900">
-                  Tickets
-                  <span className="ml-2 text-sm font-normal text-gray-500">
-                    ({filteredTickets.length}{filteredTickets.length !== tickets.length ? ` of ${tickets.length}` : ''})
-                  </span>
+            {/* Shared filter bar */}
+            <div className="flex justify-end mb-4">
+              <FilterBar filters={filters} onChange={handleFilterChange} isAdmin={false} />
+            </div>
+
+            {/* ── Section 1: Assigned to Me ──────────────────────────────── */}
+            <div className="mb-8">
+              <div className="flex items-center gap-3 mb-3">
+                <h2 className="text-base font-semibold text-gray-900">
+                  Assigned to Me
                 </h2>
-                <FilterBar
-                  filters={filters}
-                  onChange={handleFilterChange}
-                  isAdmin={false}
-                />
+                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium
+                  ${assignedToMe.length > 0 ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500'}`}>
+                  {assignedToMe.length}
+                </span>
+                {assignedToMe.length > 0 && (
+                  <span className="text-xs text-blue-600 font-medium flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-full bg-blue-500 inline-block" />
+                    Action required
+                  </span>
+                )}
               </div>
 
+              <div className="card">
+                <TicketTable
+                  tickets={assignedToMe}
+                  isAdmin={false}
+                  userRole={user.role}
+                  userTeam={user.team}
+                  hasActiveFilters={hasFilters}
+                  onClearFilters={clearFilters}
+                  onTicketDeleted={handleTicketDeleted}
+                />
+              </div>
+            </div>
 
-              <TicketTable
-                tickets={filteredTickets}
-                isAdmin={false}
-                userRole={user.role}
-                userTeam={user.team}
-                hasActiveFilters={!!(filters.status || filters.category || filters.priority)}
-                onClearFilters={() => setFilters({ status: '', category: '', priority: '', team: '' })}
-                onTicketDeleted={(deletedId) => {
-                  setTickets((prev) => prev.filter((t) => t.id !== deletedId));
-                }}
-              />
+            {/* ── Section 2: Team Queue (unassigned) ────────────────────── */}
+            <div>
+              <div className="flex items-center gap-3 mb-3">
+                <h2 className="text-base font-semibold text-gray-900">
+                  {user.team ? `${user.team} Team Queue` : 'Team Queue'}
+                </h2>
+                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium
+                  ${teamQueue.length > 0 ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-500'}`}>
+                  {teamQueue.length}
+                </span>
+                <span className="text-xs text-gray-400">Unassigned — available to any team member</span>
+              </div>
+
+              <div className="card">
+                <TicketTable
+                  tickets={teamQueue}
+                  isAdmin={false}
+                  userRole={user.role}
+                  userTeam={user.team}
+                  hasActiveFilters={hasFilters}
+                  onClearFilters={clearFilters}
+                  onTicketDeleted={handleTicketDeleted}
+                />
+              </div>
             </div>
           </>
         )}

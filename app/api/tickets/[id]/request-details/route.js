@@ -29,11 +29,10 @@ export async function POST(request, { params }) {
     const ticket = await prisma.ticket.findUnique({ where: { id } });
     if (!ticket) return NextResponse.json({ error: 'Ticket not found.' }, { status: 404 });
 
-    // Access control
-    if (
-      user.role === 'TeamMember' &&
-      (!user.team || !ticket.assignedTeams.includes(user.team))
-    ) {
+    // Access control — team member OR individually assigned user
+    const isAssignedToUser = ticket.assignedToId === user.id;
+    const isOnTeam = user.team && ticket.assignedTeams.includes(user.team);
+    if (user.role === 'TeamMember' && !isAssignedToUser && !isOnTeam) {
       return NextResponse.json({ error: 'Access denied.' }, { status: 403 });
     }
 
