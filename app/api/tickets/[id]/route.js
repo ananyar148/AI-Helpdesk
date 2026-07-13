@@ -14,6 +14,8 @@ import {
   sendTicketResolvedAdmin,
   sendTicketResolvedResolver,
   sendChangeNotificationActor,
+  sendTicketDeletedAdmin,
+  sendTicketChangedAdmin,
 } from '../../../../lib/mailer';
 
 const VALID_TEAMS      = ['Development', 'Billing', 'HR', 'Support'];
@@ -182,15 +184,18 @@ export async function PATCH(request, { params }) {
       const isResolving = status === 'Resolved' && ticket.status !== 'Resolved';
 
       if (isResolving) {
-        // Req 3: ticket resolved → client + admin + resolver all get emails
+        // Ticket resolved → client + admin + resolver all get emails
         await Promise.allSettled([
           sendTicketResolvedClient(updated),
           sendTicketResolvedAdmin(updated, user),
           sendTicketResolvedResolver(updated, user),
         ]);
       } else {
-        // Req 2: non-resolve change → only the actor gets a confirmation
-        await sendChangeNotificationActor(updated, user, changes);
+        // Non-resolve change → actor confirmation + admin notification (if actor is TeamMember)
+        await Promise.allSettled([
+          sendChangeNotificationActor(updated, user, changes),
+          sendTicketChangedAdmin(updated, user, changes),
+        ]);
       }
     }
 
@@ -221,6 +226,9 @@ export async function DELETE(request, { params }) {
       detail:   buildDetail.ticketDeleted(user, ticket.subject),
       actor:    user,
     });
+
+    // Notify admin before deleting (we need ticket data for the email)
+    await sendTicketDeletedAdmin(ticket, user);
 
     await prisma.ticket.delete({ where: { id } });
 

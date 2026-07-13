@@ -25,6 +25,11 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Invalid email or password.' }, { status: 401 });
     }
 
+    // Account exists but hasn't accepted their invite yet
+    if (!user.password) {
+      return NextResponse.json({ error: 'Your account setup is incomplete. Please check your email for the invite link.' }, { status: 401 });
+    }
+
     const isValid = await bcrypt.compare(password, user.password);
     if (!isValid) {
       return NextResponse.json({ error: 'Invalid email or password.' }, { status: 401 });

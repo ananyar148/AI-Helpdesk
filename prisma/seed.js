@@ -59,6 +59,7 @@ async function main() {
       password: pw,
       role:     'Admin',
       team:     null,
+      isActive: true,
     },
   });
   console.log('✅ Admin:', admin.email);
@@ -81,7 +82,7 @@ async function main() {
     const u = await prisma.user.upsert({
       where:  { email: m.email },
       update: {},
-      create: { name: m.name, email: m.email, password: pw, role: 'TeamMember', team: m.team },
+      create: { name: m.name, email: m.email, password: pw, role: 'TeamMember', team: m.team, isActive: true },
     });
     if (!teamRep[m.team]) teamRep[m.team] = u;
     console.log(`✅ ${u.name} (${u.team})`);
