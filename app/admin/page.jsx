@@ -20,6 +20,7 @@ export default function AdminPage() {
   const [filteredTickets, setFilteredTickets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [allUsers, setAllUsers] = useState([]);
   const [filters, setFilters] = useState({
     status: '',
     category: '',
@@ -45,16 +46,21 @@ export default function AdminPage() {
       .catch(() => router.push('/login'));
   }, [router]);
 
-  // Fetch ALL tickets
+  // Fetch ALL tickets + active users in parallel
   const fetchTickets = useCallback(async () => {
     if (!user) return;
     setLoading(true);
     setError('');
     try {
-      const res = await fetch('/api/tickets');
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to load tickets');
-      setTickets(data.tickets);
+      const [ticketsRes, usersRes] = await Promise.all([
+        fetch('/api/tickets'),
+        fetch('/api/users/active'),
+      ]);
+      const ticketsData = await ticketsRes.json();
+      const usersData   = await usersRes.json();
+      if (!ticketsRes.ok) throw new Error(ticketsData.error || 'Failed to load tickets');
+      setTickets(ticketsData.tickets);
+      setAllUsers(usersData.users || []);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -270,6 +276,7 @@ export default function AdminPage() {
                 isAdmin={true}
                 userRole={user.role}
                 userTeam={user.team}
+                allUsers={allUsers}
                 hasActiveFilters={!!(filters.status || filters.category || filters.priority || filters.team)}
                 onClearFilters={() => setFilters({ status: '', category: '', priority: '', team: '' })}
                 onTicketDeleted={(deletedId) => {

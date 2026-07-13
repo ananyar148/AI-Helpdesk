@@ -10,12 +10,105 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { StatusBadge, PriorityBadge, TeamsDisplay } from './StatusBadge';
+import { StatusBadge, PriorityBadge, CategoryBadge, TeamsDisplay } from './StatusBadge';
 import LoadingSpinner from './LoadingSpinner';
 
 const STATUS_OPTIONS   = ['Open', 'In Progress', 'Resolved'];
 const CATEGORY_OPTIONS = ['Bug', 'Feature Request', 'Billing', 'HR', 'Other'];
 const TEAM_OPTIONS     = ['Development', 'Billing', 'HR', 'Support'];
+
+// ── Inline user assignment picker — Admin only ────────────────────────────────
+function UserPicker({ currentAssignee, ticketId, allUsers, onSaved }) {
+  const [open,   setOpen]   = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error,  setError]  = useState('');
+
+  const assign = async (userId) => {
+    setSaving(true);
+    setError('');
+    try {
+      const res  = await fetch(`/api/tickets/${ticketId}`, {
+        method:  'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ assignedToId: userId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed');
+      onSaved(userId ? (allUsers.find(u => u.id === userId) ?? null) : null);
+      setOpen(false);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const label = currentAssignee
+    ? <span className="flex items-center gap-1">
+        <span className="w-4 h-4 rounded-full bg-blue-100 text-blue-700 inline-flex items-center justify-center text-xs font-bold flex-shrink-0">
+          {currentAssignee.name.charAt(0).toUpperCase()}
+        </span>
+        <span className="truncate max-w-[80px]">{currentAssignee.name}</span>
+      </span>
+    : <span className="text-gray-400">Unassigned</span>;
+
+  return (
+    <div className="relative">
+      <button
+        onClick={(e) => { e.stopPropagation(); setOpen(!open); }}
+        className="text-xs border border-gray-200 rounded-md px-2 py-1 bg-white hover:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400 whitespace-nowrap flex items-center gap-1"
+      >
+        {label} ▾
+      </button>
+
+      {open && (
+        <div
+          className="absolute z-30 left-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-lg p-2 min-w-[200px] max-h-64 overflow-y-auto"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <p className="text-xs font-semibold text-gray-500 px-2 py-1 uppercase tracking-wide">Assign to</p>
+          {/* Unassign option */}
+          <button
+            onClick={() => assign(null)}
+            disabled={saving}
+            className={`w-full text-left px-2 py-1.5 text-xs rounded-lg hover:bg-gray-50 flex items-center gap-2 ${!currentAssignee ? 'text-gray-400' : 'text-gray-700'}`}
+          >
+            <span className="w-4 h-4 rounded-full bg-gray-100 inline-flex items-center justify-center text-gray-400 flex-shrink-0">—</span>
+            Unassigned
+          </button>
+          {/* Group by team */}
+          {Object.entries(
+            allUsers.reduce((acc, u) => {
+              const t = u.team || 'Other';
+              if (!acc[t]) acc[t] = [];
+              acc[t].push(u);
+              return acc;
+            }, {})
+          ).map(([team, members]) => (
+            <div key={team}>
+              <p className="text-xs text-gray-400 px-2 py-1 mt-1 font-medium">{team}</p>
+              {members.map(u => (
+                <button
+                  key={u.id}
+                  onClick={() => assign(u.id)}
+                  disabled={saving}
+                  className={`w-full text-left px-2 py-1.5 text-xs rounded-lg hover:bg-blue-50 flex items-center gap-2
+                    ${currentAssignee?.id === u.id ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-gray-700'}`}
+                >
+                  <span className="w-4 h-4 rounded-full bg-blue-100 text-blue-700 inline-flex items-center justify-center text-xs font-bold flex-shrink-0">
+                    {u.name.charAt(0).toUpperCase()}
+                  </span>
+                  {u.name}
+                </button>
+              ))}
+            </div>
+          ))}
+          {error && <p className="text-xs text-red-500 mt-1 px-2">{error}</p>}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ── Inline multi-team picker used in the Reassign column ──────────────────────
 function TeamPicker({ currentTeams, ticketId, onSaved }) {
@@ -104,18 +197,23 @@ export default function TicketTable({
   isAdmin          = false,
   userTeam         = null,
   userRole         = null,
+  allUsers         = [],   // active users for the assignment picker (admin only)
   onTicketDeleted,
   onClearFilters,
   hasActiveFilters = false,
 }) {
   const [overrides,     setOverrides]     = useState({});
   const [updatingId,    setUpdatingId]    = useState(null);
-  const [updatingField, setUpdatingField] = useState(null); // 'status' | 'category'
+  const [updatingField, setUpdatingField] = useState(null);
   const [error,         setError]         = useState('');
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [deleting,      setDeleting]      = useState(false);
 
   const merge = (ticket) => ({ ...ticket, ...(overrides[ticket.id] || {}) });
+
+  const handleAssigneeSaved = (ticketId, newAssignee) => {
+    setOverrides((prev) => ({ ...prev, [ticketId]: { ...prev[ticketId], assignedTo: newAssignee, assignedToId: newAssignee?.id ?? null } }));
+  };
 
   const canDelete = (ticket) => {
     if (userRole === 'Admin') return true;
@@ -244,6 +342,9 @@ export default function TicketTable({
               {isAdmin && (
                 <th className="pb-3 pr-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Reassign</th>
               )}
+              {isAdmin && (
+                <th className="pb-3 pr-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Assigned To</th>
+              )}
               <th className="pb-3 pr-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Date</th>
               <th className="pb-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Actions</th>
             </tr>
@@ -272,18 +373,22 @@ export default function TicketTable({
                     </Link>
                   </td>
 
-                  {/* Category dropdown */}
+                  {/* Category — dropdown for admin, badge for team members */}
                   <td className="py-3 pr-4">
-                    {updatingId === ticket.id && updatingField === 'category' ? <LoadingSpinner size="sm" /> : (
-                      <select
-                        value={ticket.category}
-                        onChange={(e) => handleCategoryChange(ticket.id, e.target.value, e)}
-                        className="text-xs border border-gray-200 rounded-md px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400 cursor-pointer"
-                        aria-label={`Category for ${ticket.subject}`}
-                        disabled={updatingId === ticket.id}
-                      >
-                        {CATEGORY_OPTIONS.map((c) => <option key={c} value={c}>{c}</option>)}
-                      </select>
+                    {isAdmin ? (
+                      updatingId === ticket.id && updatingField === 'category' ? <LoadingSpinner size="sm" /> : (
+                        <select
+                          value={ticket.category}
+                          onChange={(e) => handleCategoryChange(ticket.id, e.target.value, e)}
+                          className="text-xs border border-gray-200 rounded-md px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400 cursor-pointer"
+                          aria-label={`Category for ${ticket.subject}`}
+                          disabled={updatingId === ticket.id}
+                        >
+                          {CATEGORY_OPTIONS.map((c) => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                      )
+                    ) : (
+                      <CategoryBadge category={ticket.category} />
                     )}
                   </td>
                   <td className="py-3 pr-4"><TeamsDisplay assignedTeams={teams} /></td>
@@ -311,6 +416,18 @@ export default function TicketTable({
                         currentTeams={teams}
                         ticketId={ticket.id}
                         onSaved={(newTeams) => handleTeamsSaved(ticket.id, newTeams)}
+                      />
+                    </td>
+                  )}
+
+                  {/* Individual assignment — Admin only */}
+                  {isAdmin && (
+                    <td className="py-3 pr-4">
+                      <UserPicker
+                        currentAssignee={ticket.assignedTo ?? null}
+                        ticketId={ticket.id}
+                        allUsers={allUsers}
+                        onSaved={(newAssignee) => handleAssigneeSaved(ticket.id, newAssignee)}
                       />
                     </td>
                   )}
@@ -373,13 +490,15 @@ export default function TicketTable({
               <div className="flex flex-wrap gap-1.5 mb-3">
                 <TeamsDisplay assignedTeams={teams} />
                 <PriorityBadge priority={ticket.priority} />
+                <CategoryBadge category={ticket.category} />
               </div>
               <div className="flex items-center gap-2 flex-wrap">
                 <select
                   value={ticket.category}
                   onChange={(e) => handleCategoryChange(ticket.id, e.target.value, e)}
                   className="text-xs border border-gray-200 rounded-md px-2 py-1 bg-white"
-                  disabled={updatingId === ticket.id}
+                  disabled={updatingId === ticket.id || !isAdmin}
+                  style={!isAdmin ? { pointerEvents: 'none' } : {}}
                 >
                   {CATEGORY_OPTIONS.map((c) => <option key={c} value={c}>{c}</option>)}
                 </select>

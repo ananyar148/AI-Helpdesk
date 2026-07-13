@@ -16,6 +16,7 @@ import {
   sendChangeNotificationActor,
   sendTicketDeletedAdmin,
   sendTicketChangedAdmin,
+  sendTicketAssigned,
 } from '../../../../lib/mailer';
 
 const VALID_TEAMS      = ['Development', 'Billing', 'HR', 'Support'];
@@ -23,11 +24,14 @@ const VALID_STATUSES   = ['Open', 'In Progress', 'Resolved'];
 const VALID_PRIORITIES = ['Low', 'Medium', 'High'];
 const VALID_CATEGORIES = ['Bug', 'Feature Request', 'Billing', 'HR', 'Other'];
 
-/** Returns true if the user is on at least one of the ticket's assigned teams */
+/** Returns true if the user can access this ticket */
 function userCanAccessTicket(user, ticket) {
   if (user.role === 'Admin') return true;
-  if (user.role === 'TeamMember' && user.team) {
-    return ticket.assignedTeams.includes(user.team);
+  if (user.role === 'TeamMember') {
+    // Individually assigned — only the assignee can access
+    if (ticket.assignedToId) return ticket.assignedToId === user.id;
+    // No individual assignment — anyone on the assigned team can access
+    return user.team ? ticket.assignedTeams.includes(user.team) : false;
   }
   return false;
 }
@@ -44,6 +48,7 @@ export async function GET(request, { params }) {
       include: {
         activities:  { orderBy: { createdAt: 'asc' } },
         attachments: { orderBy: { createdAt: 'asc' } },
+        assignedTo:  { select: { id: true, name: true, email: true, team: true } },
       },
     });
 
@@ -68,18 +73,27 @@ export async function PATCH(request, { params }) {
     if (!user) return NextResponse.json({ error: 'Unauthorized.' }, { status: 401 });
 
     const body = await request.json();
-    const { status, assignedTeams, priority, category } = body;
+    const { status, assignedTeams, priority, category, assignedToId } = body;
 
-    const ticket = await prisma.ticket.findUnique({ where: { id } });
+    const ticket = await prisma.ticket.findUnique({
+      where:   { id },
+      include: { assignedTo: { select: { id: true, name: true, email: true, team: true } } },
+    });
     if (!ticket) return NextResponse.json({ error: 'Ticket not found.' }, { status: 404 });
 
     if (!userCanAccessTicket(user, ticket)) {
       return NextResponse.json({ error: 'Access denied.' }, { status: 403 });
     }
 
-    // Only admins can change team assignments
+    // Only admins can change team assignments, individual assignment, or category
     if (assignedTeams && user.role !== 'Admin') {
       return NextResponse.json({ error: 'Only admins can reassign teams.' }, { status: 403 });
+    }
+    if (assignedToId !== undefined && user.role !== 'Admin') {
+      return NextResponse.json({ error: 'Only admins can assign tickets to individuals.' }, { status: 403 });
+    }
+    if (category && user.role !== 'Admin') {
+      return NextResponse.json({ error: 'Only admins can change the category.' }, { status: 403 });
     }
 
     // Validate inputs
@@ -103,7 +117,29 @@ export async function PATCH(request, { params }) {
     if (priority)      updateData.priority      = priority;
     if (category)      updateData.category      = category;
 
-    const updated = await prisma.ticket.update({ where: { id }, data: updateData });
+    // Validate assignedToId — must be an active TeamMember if provided
+    let newAssignee = null;
+    if (assignedToId !== undefined) {
+      if (assignedToId === null) {
+        // Explicit null = unassign
+        updateData.assignedToId = null;
+      } else {
+        newAssignee = await prisma.user.findUnique({
+          where:  { id: assignedToId },
+          select: { id: true, name: true, email: true, role: true, team: true, isActive: true },
+        });
+        if (!newAssignee || !newAssignee.isActive) {
+          return NextResponse.json({ error: 'Assignee not found or inactive.' }, { status: 400 });
+        }
+        updateData.assignedToId = assignedToId;
+      }
+    }
+
+    const updated = await prisma.ticket.update({
+      where:   { id },
+      data:    updateData,
+      include: { assignedTo: { select: { id: true, name: true, email: true, team: true } } },
+    });
 
     // ── Audit logs ────────────────────────────────────────────────────────────
     if (status && status !== ticket.status) {
@@ -154,6 +190,30 @@ export async function PATCH(request, { params }) {
         newValue: category,
         actor:    user,
       });
+    }
+
+    if (assignedToId !== undefined && assignedToId !== ticket.assignedToId) {
+      if (assignedToId === null) {
+        await logActivity({
+          ticketId: id,
+          action:   ACTIONS.ASSIGNED_TO,
+          detail:   buildDetail.unassigned(user),
+          oldValue: ticket.assignedTo?.name ?? null,
+          newValue: null,
+          actor:    user,
+        });
+      } else if (newAssignee) {
+        await logActivity({
+          ticketId: id,
+          action:   ACTIONS.ASSIGNED_TO,
+          detail:   buildDetail.assignedTo(user, newAssignee.name),
+          oldValue: ticket.assignedTo?.name ?? null,
+          newValue: newAssignee.name,
+          actor:    user,
+        });
+        // Notify the newly assigned person
+        await sendTicketAssigned(updated, newAssignee, user);
+      }
     }
 
     // ── Email notifications ───────────────────────────────────────────────────

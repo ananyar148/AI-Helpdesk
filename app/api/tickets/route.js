@@ -203,9 +203,13 @@ export async function GET(request) {
 
     const where = {};
 
-    // TeamMembers see only tickets where their team appears in assignedTeams
+    // TeamMembers: see only tickets assigned to them individually,
+    // OR tickets assigned to their team (if no individual assignee set)
     if (user.role === 'TeamMember' && user.team) {
-      where.assignedTeams = { has: user.team };
+      where.OR = [
+        { assignedToId: user.id },
+        { assignedToId: null, assignedTeams: { has: user.team } },
+      ];
     }
 
     if (status)                        where.status   = status;
@@ -216,6 +220,7 @@ export async function GET(request) {
     const tickets = await prisma.ticket.findMany({
       where,
       orderBy: { createdAt: 'desc' },
+      include: { assignedTo: { select: { id: true, name: true, team: true } } },
     });
 
     return NextResponse.json({ tickets });
