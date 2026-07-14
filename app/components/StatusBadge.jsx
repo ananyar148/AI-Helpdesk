@@ -8,6 +8,7 @@ export function StatusBadge({ status }) {
     Open: 'badge-open',
     'In Progress': 'badge-in-progress',
     Resolved: 'badge-resolved',
+    'Signed Off': 'badge bg-purple-100 text-purple-700',
   };
   return (
     <span className={map[status] || 'badge bg-gray-100 text-gray-600'}>

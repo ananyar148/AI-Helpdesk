@@ -28,6 +28,8 @@ const ACTION_CONFIG = {
   details_requested:  { icon: '📧', label: 'Details Requested',   color: 'bg-amber-100 text-amber-700' },
   details_provided:   { icon: '💬', label: 'Details Provided',    color: 'bg-green-100 text-green-700' },
   follow_up_added:    { icon: '↩️',  label: 'Follow-up Added',     color: 'bg-blue-100 text-blue-700'   },
+  signed_off:         { icon: '✅',  label: 'Signed Off',          color: 'bg-purple-100 text-purple-700' },
+  reopened:           { icon: '🔄', label: 'Reopened',            color: 'bg-orange-100 text-orange-700' },
   work_log:           { icon: '📝', label: 'Work Log',            color: 'bg-teal-100 text-teal-700'   },
 };
 

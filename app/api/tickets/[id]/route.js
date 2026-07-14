@@ -100,6 +100,18 @@ export async function PATCH(request, { params }) {
     if (category && user.role !== 'Admin') {
       return NextResponse.json({ error: 'Only admins can change the category.' }, { status: 403 });
     }
+    // Only admins can sign off a ticket
+    if (status === 'Signed Off' && user.role !== 'Admin') {
+      return NextResponse.json({ error: 'Only admins can sign off tickets.' }, { status: 403 });
+    }
+    // A Signed Off ticket can only be reopened by an admin
+    if (ticket.status === 'Signed Off' && status && status !== 'Signed Off' && user.role !== 'Admin') {
+      return NextResponse.json({ error: 'Only admins can reopen a signed-off ticket.' }, { status: 403 });
+    }
+    // TeamMembers cannot set status to Resolved if ticket is already Signed Off
+    if (ticket.status === 'Signed Off' && status === 'Resolved') {
+      return NextResponse.json({ error: 'Cannot change a signed-off ticket back to Resolved.' }, { status: 400 });
+    }
 
     // Validate inputs
     if (status       && !VALID_STATUSES.includes(status))
@@ -246,17 +258,56 @@ export async function PATCH(request, { params }) {
     }
 
     if (changes.length > 0) {
-      const isResolving = status === 'Resolved' && ticket.status !== 'Resolved';
+      const prevStatus    = ticket.status;
+      const isResolving   = status === 'Resolved'   && prevStatus !== 'Resolved';
+      const isSigningOff  = status === 'Signed Off' && prevStatus !== 'Signed Off';
+      const isReopening   = status === 'Open'       && (prevStatus === 'Signed Off' || prevStatus === 'Resolved');
 
-      if (isResolving) {
-        // Ticket resolved → client + admin + resolver all get emails
-        await Promise.allSettled([
-          sendTicketResolvedClient(updated),
-          sendTicketResolvedAdmin(updated, user),
-          sendTicketResolvedResolver(updated, user),
-        ]);
+      if (isSigningOff) {
+        // Find the team member who last resolved the ticket (from activity log)
+        const resolveActivity = await prisma.ticketActivity.findFirst({
+          where:   { ticketId: id, action: 'status_updated', newValue: 'Resolved' },
+          orderBy: { createdAt: 'desc' },
+        });
+        const resolverInfo = resolveActivity?.userId
+          ? await prisma.user.findUnique({ where: { id: resolveActivity.userId }, select: { id: true, name: true, email: true, team: true, role: true } })
+          : null;
+
+        await logActivity({
+          ticketId: id,
+          action:   ACTIONS.SIGNED_OFF,
+          detail:   buildDetail.signedOff(user),
+          oldValue: prevStatus,
+          newValue: 'Signed Off',
+          actor:    user,
+        });
+        await sendTicketSignedOff(updated, user, resolverInfo);
+
+      } else if (isReopening) {
+        await logActivity({
+          ticketId: id,
+          action:   ACTIONS.REOPENED,
+          detail:   buildDetail.reopened(user),
+          oldValue: prevStatus,
+          newValue: 'Open',
+          actor:    user,
+        });
+        await sendTicketReopened(updated, user);
+
+      } else if (isResolving) {
+        if (user.role === 'TeamMember') {
+          // TeamMember resolves → notify admin + resolver only (NOT client)
+          await sendTicketResolvedByTeam(updated, user);
+        } else {
+          // Admin resolves directly → treat as sign-off equivalent: notify all
+          await Promise.allSettled([
+            sendTicketResolvedClient(updated),
+            sendTicketResolvedAdmin(updated, user),
+            sendTicketResolvedResolver(updated, user),
+          ]);
+        }
       } else {
-        // Non-resolve change → actor confirmation + admin notification (if actor is TeamMember)
+        // Non-status changes or status change that isn't a key workflow step
         await Promise.allSettled([
           sendChangeNotificationActor(updated, user, changes),
           sendTicketChangedAdmin(updated, user, changes),

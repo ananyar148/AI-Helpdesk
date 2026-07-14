@@ -14,7 +14,8 @@ import LoadingSpinner from '../../components/LoadingSpinner';
 import ActivityTimeline from '../../components/ActivityTimeline';
 import { StatusBadge, PriorityBadge, CategoryBadge, TeamsDisplay, TeamBadge } from '../../components/StatusBadge';
 
-const STATUS_OPTIONS   = ['Open', 'In Progress', 'Resolved'];
+const STATUS_OPTIONS       = ['Open', 'In Progress', 'Resolved'];
+const STATUS_OPTIONS_ADMIN = ['Open', 'In Progress', 'Resolved', 'Signed Off'];
 const PRIORITY_OPTIONS = ['Low', 'Medium', 'High'];
 const TEAM_OPTIONS     = ['Development', 'Billing', 'HR', 'Support'];
 
@@ -424,9 +425,16 @@ export default function TicketDetailPage() {
               <label className="input-label">Status</label>
               <select value={ticket.status}
                 onChange={(e) => handleUpdate('status', e.target.value)}
-                disabled={updating} className="input-field mt-1">
-                {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
+                disabled={updating || (ticket.status === 'Signed Off' && user?.role !== 'Admin')}
+                className="input-field mt-1">
+                {(user?.role === 'Admin' ? STATUS_OPTIONS_ADMIN : STATUS_OPTIONS).map((s) => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
               </select>
+              {ticket.status === 'Signed Off' && user?.role !== 'Admin' && (
+                <p className="text-xs text-amber-600 mt-1">Only an admin can change the status of a signed-off ticket.</p>
+              )}
+            </div>
             </div>
 
             <div className="card">

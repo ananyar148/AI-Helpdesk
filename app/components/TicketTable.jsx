@@ -13,7 +13,8 @@ import Link from 'next/link';
 import { StatusBadge, PriorityBadge, CategoryBadge, TeamsDisplay } from './StatusBadge';
 import LoadingSpinner from './LoadingSpinner';
 
-const STATUS_OPTIONS   = ['Open', 'In Progress', 'Resolved'];
+const STATUS_OPTIONS        = ['Open', 'In Progress', 'Resolved'];
+const STATUS_OPTIONS_ADMIN  = ['Open', 'In Progress', 'Resolved', 'Signed Off'];
 const CATEGORY_OPTIONS = ['Bug', 'Feature Request', 'Billing', 'HR', 'Other'];
 const TEAM_OPTIONS     = ['Development', 'Billing', 'HR', 'Support'];
 
@@ -419,9 +420,9 @@ export default function TicketTable({
                         onChange={(e) => handleStatusChange(ticket.id, e.target.value, e)}
                         className="text-xs border border-gray-200 rounded-md px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400 cursor-pointer"
                         aria-label={`Status for ${ticket.subject}`}
-                        disabled={updatingId === ticket.id}
+                        disabled={updatingId === ticket.id || ticket.status === 'Signed Off' && !isAdmin}
                       >
-                        {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
+                        {(isAdmin ? STATUS_OPTIONS_ADMIN : STATUS_OPTIONS).map((s) => <option key={s} value={s}>{s}</option>)}
                       </select>
                     )}
                   </td>
@@ -523,9 +524,9 @@ export default function TicketTable({
                   value={ticket.status}
                   onChange={(e) => handleStatusChange(ticket.id, e.target.value, e)}
                   className="text-xs border border-gray-200 rounded-md px-2 py-1 bg-white flex-1"
-                  disabled={updatingId === ticket.id}
+                  disabled={updatingId === ticket.id || (ticket.status === 'Signed Off' && !isAdmin)}
                 >
-                  {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
+                  {(isAdmin ? STATUS_OPTIONS_ADMIN : STATUS_OPTIONS).map((s) => <option key={s} value={s}>{s}</option>)}
                 </select>
                 {isAdmin && (
                   <TeamPicker
