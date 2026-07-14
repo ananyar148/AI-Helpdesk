@@ -435,7 +435,6 @@ export default function TicketDetailPage() {
                 <p className="text-xs text-amber-600 mt-1">Only an admin can change the status of a signed-off ticket.</p>
               )}
             </div>
-            </div>
 
             <div className="card">
               <label className="input-label">Priority</label>

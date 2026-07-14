@@ -78,7 +78,7 @@ export async function PATCH(request, { params }) {
     if (!user) return NextResponse.json({ error: 'Unauthorized.' }, { status: 401 });
 
     const body = await request.json();
-    const { status, assignedTeams, priority, category, assignedUserIds } = body;
+    const { status, assignedTeams, priority, category, assignedToId } = body;
 
     const ticket = await prisma.ticket.findUnique({
       where:   { id },
