@@ -125,7 +125,7 @@ function TimelineEntry({ entry, isLast }) {
             {!isWorklog && !MESSAGE_ACTIONS.has(entry.action) && (entry.oldValue || entry.newValue) && (
               <div className="flex items-center gap-2 mt-1.5 text-xs">
                 {entry.oldValue && (
-                  <span className="px-2 py-0.5 rounded-md bg-red-50 text-red-600 line-through font-medium">{entry.oldValue}</span>
+                  <span className="px-2 py-0.5 rounded-md bg-red-50 text-red-600 font-medium">{entry.oldValue}</span>
                 )}
                 {entry.oldValue && entry.newValue && <span className="text-gray-400 font-bold">→</span>}
                 {entry.newValue && (
