@@ -29,11 +29,9 @@ export async function POST(request, { params }) {
     const ticket = await prisma.ticket.findUnique({ where: { id } });
     if (!ticket) return NextResponse.json({ error: 'Ticket not found.' }, { status: 404 });
 
-    // Access control — team member OR individually assigned user
-    const isAssignedToUser = ticket.assignedToId === user.id;
-    const isOnTeam = user.team && ticket.assignedTeams.includes(user.team);
-    if (user.role === 'TeamMember' && !isAssignedToUser && !isOnTeam) {
-      return NextResponse.json({ error: 'Access denied.' }, { status: 403 });
+    // Access control — Admin only can request details from the client
+    if (user.role !== 'Admin') {
+      return NextResponse.json({ error: 'Only admins can request details from the client.' }, { status: 403 });
     }
 
     const clientEmail = ticket.clientEmail;

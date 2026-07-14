@@ -302,10 +302,10 @@ export default function TicketDetailPage() {
                     </p>
                   )}
                 </div>
-                {(canAccess && ticket.clientEmail) || canDelete ? (
+                {(canAccess && ticket.clientEmail && user.role === 'Admin') || canDelete ? (
                   <div className="flex items-center gap-2 flex-shrink-0">
-                    {/* Request Details — any user who can access the ticket */}
-                    {canAccess && ticket.clientEmail && (
+                    {/* Request Details — admin only */}
+                    {canAccess && ticket.clientEmail && user.role === 'Admin' && (
                       <button onClick={() => { setShowDetailsModal(true); setDetailsError(''); setDetailsSuccess(''); }}
                         className="btn-secondary text-xs px-3 py-1.5 flex items-center gap-1.5">
                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
