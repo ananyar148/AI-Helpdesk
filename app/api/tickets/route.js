@@ -212,6 +212,9 @@ export async function GET(request) {
       ];
     }
 
+    // Never show soft-deleted tickets
+    where.deletedAt = null;
+
     if (status)                        where.status   = status;
     if (category)                      where.category = category;
     if (priority)                      where.priority = priority;

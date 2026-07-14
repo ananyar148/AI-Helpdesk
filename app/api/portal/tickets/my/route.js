@@ -38,8 +38,8 @@ export async function GET(request) {
 
     // Match by clientUserId OR clientEmail (covers tickets submitted before account creation)
     const where = clientUserId
-      ? { OR: [{ clientUserId }, { clientEmail: email }] }
-      : { clientEmail: email };
+      ? { OR: [{ clientUserId }, { clientEmail: email }], deletedAt: null }
+      : { clientEmail: email, deletedAt: null };
 
     const tickets = await prisma.ticket.findMany({
       where,

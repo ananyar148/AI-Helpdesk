@@ -52,7 +52,7 @@ export async function GET(request, { params }) {
       },
     });
 
-    if (!ticket) return NextResponse.json({ error: 'Ticket not found.' }, { status: 404 });
+    if (!ticket || ticket.deletedAt) return NextResponse.json({ error: 'Ticket not found.' }, { status: 404 });
 
     if (!userCanAccessTicket(user, ticket)) {
       return NextResponse.json({ error: 'Access denied.' }, { status: 403 });
@@ -292,10 +292,14 @@ export async function DELETE(request, { params }) {
       actor:    user,
     });
 
-    // Notify admin before deleting (we need ticket data for the email)
+    // Notify admin before soft-deleting (we need ticket data for the email)
     await sendTicketDeletedAdmin(ticket, user);
 
-    await prisma.ticket.delete({ where: { id } });
+    // Soft delete — set deletedAt instead of removing from DB
+    await prisma.ticket.update({
+      where: { id },
+      data:  { deletedAt: new Date() },
+    });
 
     return NextResponse.json({ success: true, message: 'Ticket deleted.' });
   } catch (err) {
