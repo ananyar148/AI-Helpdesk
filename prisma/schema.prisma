@@ -42,9 +42,8 @@ model Ticket {
   clientUserId     String?
   clientUser       ClientUser?      @relation(fields: [clientUserId], references: [id], onDelete: SetNull)
 
-  // Individual assignment — Admin assigns to a specific team member
-  assignedToId     String?
-  assignedTo       User?            @relation("AssignedTickets", fields: [assignedToId], references: [id], onDelete: SetNull)
+  // Individual assignment — Admin assigns to specific team members (many-to-many)
+  assignees     TicketAssignee[]
 
   // Follow-up thread — links a follow-up ticket back to the original
   parentTicketId   String?
@@ -118,6 +117,19 @@ model TicketActivity {
   @@map("ticket_activities")
 }
 
+// ─── Ticket Assignee (many-to-many: ticket ↔ user) ────────────────────────────
+model TicketAssignee {
+  ticketId  String
+  ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId],   references: [id], onDelete: Cascade)
+
+  assignedAt DateTime @default(now())
+
+  @@id([ticketId, userId])
+  @@map("ticket_assignees")
+}
+
 // ─── Team User (staff) ────────────────────────────────────────────────────────
 model User {
   id        String   @id @default(cuid())
@@ -133,7 +145,7 @@ model User {
   inviteExpiry  DateTime?
 
   // Tickets individually assigned to this user
-  assignedTickets Ticket[] @relation("AssignedTickets")
+  assignedTickets TicketAssignee[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

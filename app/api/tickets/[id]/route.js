@@ -17,10 +17,13 @@ import {
   sendTicketDeletedAdmin,
   sendTicketChangedAdmin,
   sendTicketAssigned,
+  sendTicketResolvedByTeam,
+  sendTicketSignedOff,
+  sendTicketReopened,
 } from '../../../../lib/mailer';
 
 const VALID_TEAMS      = ['Development', 'Billing', 'HR', 'Support'];
-const VALID_STATUSES   = ['Open', 'In Progress', 'Resolved'];
+const VALID_STATUSES   = ['Open', 'In Progress', 'Resolved', 'Signed Off'];
 const VALID_PRIORITIES = ['Low', 'Medium', 'High'];
 const VALID_CATEGORIES = ['Bug', 'Feature Request', 'Billing', 'HR', 'Other'];
 
@@ -28,9 +31,11 @@ const VALID_CATEGORIES = ['Bug', 'Feature Request', 'Billing', 'HR', 'Other'];
 function userCanAccessTicket(user, ticket) {
   if (user.role === 'Admin') return true;
   if (user.role === 'TeamMember') {
-    // Individually assigned — only the assignee can access
-    if (ticket.assignedToId) return ticket.assignedToId === user.id;
-    // No individual assignment — anyone on the assigned team can access
+    // Individually assigned — only assignees can access
+    if (ticket.assignees?.length > 0) {
+      return ticket.assignees.some(a => a.userId === user.id);
+    }
+    // No individual assignees — anyone on the assigned team can access
     return user.team ? ticket.assignedTeams.includes(user.team) : false;
   }
   return false;
@@ -48,7 +53,7 @@ export async function GET(request, { params }) {
       include: {
         activities:  { orderBy: { createdAt: 'asc' } },
         attachments: { orderBy: { createdAt: 'asc' } },
-        assignedTo:  { select: { id: true, name: true, email: true, team: true } },
+        assignees:   { include: { user: { select: { id: true, name: true, email: true, team: true } } } },
       },
     });
 
@@ -73,11 +78,11 @@ export async function PATCH(request, { params }) {
     if (!user) return NextResponse.json({ error: 'Unauthorized.' }, { status: 401 });
 
     const body = await request.json();
-    const { status, assignedTeams, priority, category, assignedToId } = body;
+    const { status, assignedTeams, priority, category, assignedUserIds } = body;
 
     const ticket = await prisma.ticket.findUnique({
       where:   { id },
-      include: { assignedTo: { select: { id: true, name: true, email: true, team: true } } },
+      include: { assignees: { include: { user: { select: { id: true, name: true, email: true, team: true } } } } },
     });
     if (!ticket) return NextResponse.json({ error: 'Ticket not found.' }, { status: 404 });
 
