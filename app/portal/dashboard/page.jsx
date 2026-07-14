@@ -6,8 +6,7 @@
  * Fetches by clientUserId (Google session) and also by email for legacy tickets.
  */
 
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { useSession, signOut } from 'next-auth/react';
+import { useState, useEffect, useCallback, useRef } from 'react';import { useSession, signOut } from 'next-auth/react';
 import { useRouter }           from 'next/navigation';
 import Link                    from 'next/link';
 import LoadingSpinner          from '../../components/LoadingSpinner';
@@ -227,9 +226,22 @@ function TicketCard({ ticket, clientEmail }) {
   const [expanded,     setExpanded]   = useState(false);
   const [activeAction, setActiveAction] = useState(null); // 'follow-up' | 'provide-details' | null
   const [messageText,  setMessageText] = useState('');
+  const [attachments,  setAttachments] = useState([]);
   const [submitting,   setSubmitting]  = useState(false);
   const [msg,          setMsg]         = useState('');
-  const [lightbox,     setLightbox]    = useState(null); // attachment object | null
+  const [lightbox,     setLightbox]    = useState(null);
+  const fileRef = useRef(null);
+
+  const handleFiles = async (files) => {
+    const incoming = Array.from(files);
+    const processed = [];
+    for (const file of incoming) {
+      if (!ACCEPTED_TYPES.includes(file.type)) continue;
+      if (file.size > MAX_FILE_MB * 1024 * 1024) continue;
+      processed.push({ fileName: file.name, mimeType: file.type, dataUrl: await fileToDataUrl(file), sizeBytes: file.size });
+    }
+    setAttachments(p => [...p, ...processed].slice(0, MAX_FILES));
+  };
 
   const handleAction = async (endpoint, successText) => {
     if (!messageText.trim()) return;
@@ -238,12 +250,18 @@ function TicketCard({ ticket, clientEmail }) {
     try {
       const res  = await fetch(`/api/portal/tickets/${ticket.id}/${endpoint}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clientEmail, message: messageText.trim(), details: messageText.trim() }),
+        body: JSON.stringify({
+          clientEmail,
+          message:     messageText.trim(),
+          details:     messageText.trim(),
+          attachments: attachments.map(({ fileName, mimeType, dataUrl, sizeBytes }) => ({ fileName, mimeType, dataUrl, sizeBytes })),
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to submit');
       setMsg(`✓ ${successText}`);
       setMessageText('');
+      setAttachments([]);
       setTimeout(() => { setMsg(''); setActiveAction(null); }, 2500);
     } catch (e) {
       setMsg(`Error: ${e.message}`);
@@ -252,7 +270,7 @@ function TicketCard({ ticket, clientEmail }) {
     }
   };
 
-  const closeAction = () => { setActiveAction(null); setMessageText(''); setMsg(''); };
+  const closeAction = () => { setActiveAction(null); setMessageText(''); setAttachments([]); setMsg(''); };
 
   return (
     <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
@@ -423,6 +441,31 @@ function TicketCard({ ticket, clientEmail }) {
                       ? 'Add more context or an update to this ticket…'
                       : 'Share the additional details our team requested…'}
                     className="input-field resize-none text-sm mb-3" disabled={submitting} />
+
+                  {/* Image attachments */}
+                  <div className="mb-3">
+                    <div
+                      onClick={() => fileRef.current?.click()}
+                      onDragOver={e => e.preventDefault()}
+                      onDrop={e => { e.preventDefault(); handleFiles(e.dataTransfer.files); }}
+                      className="border-2 border-dashed border-gray-200 rounded-lg p-3 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-colors">
+                      <p className="text-xs text-gray-400">Click or drag images here (optional)</p>
+                      <input ref={fileRef} type="file" accept="image/*" multiple className="hidden"
+                        onChange={e => handleFiles(e.target.files)} />
+                    </div>
+                    {attachments.length > 0 && (
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        {attachments.map((att, idx) => (
+                          <div key={idx} className="relative group">
+                            <img src={att.dataUrl} alt={att.fileName} className="w-16 h-16 object-cover rounded-lg border border-gray-200" />
+                            <button type="button"
+                              onClick={() => setAttachments(p => p.filter((_, i) => i !== idx))}
+                              className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white rounded-full text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">✕</button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                   <div className="flex gap-2">
                     <button
                       onClick={() => handleAction(activeAction, activeAction === 'follow-up' ? 'Follow-up added.' : 'Details submitted.')}
