@@ -19,25 +19,54 @@ const CATEGORY_OPTIONS = ['Bug', 'Feature Request', 'Billing', 'HR', 'Other'];
 const TEAM_OPTIONS     = ['Development', 'Billing', 'HR', 'Support'];
 
 // ── Inline user assignment picker — Admin only ────────────────────────────────
-function UserPicker({ currentAssignee, ticketId, allUsers, onSaved }) {
+function UserPicker({ currentAssignees = [], ticketId, allUsers, onSaved }) {
   const [open,       setOpen]       = useState(false);
   const [saving,     setSaving]     = useState(false);
-  const [savingFor,  setSavingFor]  = useState(null); // userId being saved
+  const [savingFor,  setSavingFor]  = useState(null);
   const [error,      setError]      = useState('');
+
+  const currentIds = (currentAssignees || []).map(a => a.userId);
 
   const assign = async (userId) => {
     setSaving(true);
     setSavingFor(userId);
     setError('');
     try {
+      // Toggle: add if not present, remove if present
+      const currentIds = (currentAssignees || []).map(a => a.userId);
+      const newIds = currentIds.includes(userId)
+        ? currentIds.filter(id => id !== userId)
+        : [...currentIds, userId];
       const res  = await fetch(`/api/tickets/${ticketId}`, {
         method:  'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ assignedToId: userId }),
+        body:    JSON.stringify({ assignedUserIds: newIds }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed');
-      onSaved(userId ? (allUsers.find(u => u.id === userId) ?? null) : null);
+      onSaved(data.ticket.assignees || []);
+      // Don't close — allow multi-select
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+      setSavingFor(null);
+    }
+  };
+
+  const unassignAll = async () => {
+    setSaving(true);
+    setSavingFor('__all__');
+    setError('');
+    try {
+      const res  = await fetch(`/api/tickets/${ticketId}`, {
+        method:  'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ assignedUserIds: [] }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed');
+      onSaved([]);
       setOpen(false);
     } catch (err) {
       setError(err.message);
@@ -47,23 +76,29 @@ function UserPicker({ currentAssignee, ticketId, allUsers, onSaved }) {
     }
   };
 
-  const label = saving
+  const label = saving && savingFor !== '__all__'
     ? (
       <span className="flex items-center gap-1.5 text-blue-600">
         <svg className="animate-spin w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24">
           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/>
         </svg>
-        Assigning…
+        Saving…
       </span>
     )
-    : currentAssignee
+    : currentIds.length > 0
     ? (
-      <span className="flex items-center gap-1">
-        <span className="w-4 h-4 rounded-full bg-blue-100 text-blue-700 inline-flex items-center justify-center text-xs font-bold flex-shrink-0">
-          {currentAssignee.name.charAt(0).toUpperCase()}
-        </span>
-        <span className="truncate max-w-[80px]">{currentAssignee.name}</span>
+      <span className="flex items-center gap-1 flex-wrap max-w-[120px]">
+        {currentIds.slice(0, 2).map(uid => {
+          const u = allUsers.find(x => x.id === uid);
+          return u ? (
+            <span key={uid} className="w-4 h-4 rounded-full bg-blue-100 text-blue-700 inline-flex items-center justify-center text-xs font-bold flex-shrink-0"
+              title={u.name}>
+              {u.name.charAt(0).toUpperCase()}
+            </span>
+          ) : null;
+        })}
+        {currentIds.length > 2 && <span className="text-xs text-gray-500">+{currentIds.length - 2}</span>}
       </span>
     )
     : <span className="text-gray-400">Unassigned</span>;
@@ -84,19 +119,19 @@ function UserPicker({ currentAssignee, ticketId, allUsers, onSaved }) {
           onClick={(e) => e.stopPropagation()}
         >
           <p className="text-xs font-semibold text-gray-500 px-2 py-1 uppercase tracking-wide">Assign to</p>
-          {/* Unassign option */}
+          {/* Unassign all */}
           <button
-            onClick={() => assign(null)}
+            onClick={unassignAll}
             disabled={saving}
-            className={`w-full text-left px-2 py-1.5 text-xs rounded-lg hover:bg-gray-50 flex items-center gap-2 ${!currentAssignee ? 'text-gray-400' : 'text-gray-700'}`}
+            className={`w-full text-left px-2 py-1.5 text-xs rounded-lg hover:bg-gray-50 flex items-center gap-2 ${currentIds.length === 0 ? 'text-gray-400' : 'text-gray-700'}`}
           >
-            {savingFor === null && saving
+            {savingFor === '__all__' && saving
               ? <svg className="animate-spin w-3 h-3 text-blue-500" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/></svg>
               : <span className="w-4 h-4 rounded-full bg-gray-100 inline-flex items-center justify-center text-gray-400 flex-shrink-0">—</span>
             }
-            Unassigned
+            Unassign all
           </button>
-          {/* Group by team */}
+          {/* Group by team — checkboxes for multi-select */}
           {Object.entries(
             allUsers.reduce((acc, u) => {
               const t = u.team || 'Other';
@@ -107,23 +142,26 @@ function UserPicker({ currentAssignee, ticketId, allUsers, onSaved }) {
           ).map(([team, members]) => (
             <div key={team}>
               <p className="text-xs text-gray-400 px-2 py-1 mt-1 font-medium">{team}</p>
-              {members.map(u => (
-                <button
-                  key={u.id}
-                  onClick={() => assign(u.id)}
-                  disabled={saving}
-                  className={`w-full text-left px-2 py-1.5 text-xs rounded-lg hover:bg-blue-50 flex items-center gap-2
-                    ${currentAssignee?.id === u.id ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-gray-700'}`}
-                >
-                  {savingFor === u.id
-                    ? <svg className="animate-spin w-3 h-3 text-blue-500 flex-shrink-0" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/></svg>
-                    : <span className="w-4 h-4 rounded-full bg-blue-100 text-blue-700 inline-flex items-center justify-center text-xs font-bold flex-shrink-0">
-                        {u.name.charAt(0).toUpperCase()}
-                      </span>
-                  }
-                  {u.name}
-                </button>
-              ))}
+              {members.map(u => {
+                const isChecked = currentIds.includes(u.id);
+                return (
+                  <button
+                    key={u.id}
+                    onClick={() => assign(u.id)}
+                    disabled={saving}
+                    className={`w-full text-left px-2 py-1.5 text-xs rounded-lg hover:bg-blue-50 flex items-center gap-2
+                      ${isChecked ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-gray-700'}`}
+                  >
+                    {savingFor === u.id && saving
+                      ? <svg className="animate-spin w-3 h-3 text-blue-500 flex-shrink-0" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/></svg>
+                      : <span className={`w-4 h-4 rounded-full inline-flex items-center justify-center text-xs font-bold flex-shrink-0 ${isChecked ? 'bg-blue-200 text-blue-800' : 'bg-blue-100 text-blue-700'}`}>
+                          {isChecked ? '✓' : u.name.charAt(0).toUpperCase()}
+                        </span>
+                    }
+                    {u.name}
+                  </button>
+                );
+              })}
             </div>
           ))}
           {error && <p className="text-xs text-red-500 mt-1 px-2">{error}</p>}
@@ -234,8 +272,8 @@ export default function TicketTable({
 
   const merge = (ticket) => ({ ...ticket, ...(overrides[ticket.id] || {}) });
 
-  const handleAssigneeSaved = (ticketId, newAssignee) => {
-    setOverrides((prev) => ({ ...prev, [ticketId]: { ...prev[ticketId], assignedTo: newAssignee, assignedToId: newAssignee?.id ?? null } }));
+  const handleAssigneeSaved = (ticketId, newAssignees) => {
+    setOverrides((prev) => ({ ...prev, [ticketId]: { ...prev[ticketId], assignees: newAssignees } }));
   };
 
   const canDelete = (ticket) => userRole === 'Admin';
@@ -442,10 +480,10 @@ export default function TicketTable({
                   {isAdmin && (
                     <td className="py-3 pr-4">
                       <UserPicker
-                        currentAssignee={ticket.assignedTo ?? null}
+                        currentAssignees={ticket.assignees ?? []}
                         ticketId={ticket.id}
                         allUsers={allUsers}
-                        onSaved={(newAssignee) => handleAssigneeSaved(ticket.id, newAssignee)}
+                        onSaved={(newAssignees) => handleAssigneeSaved(ticket.id, newAssignees)}
                       />
                     </td>
                   )}

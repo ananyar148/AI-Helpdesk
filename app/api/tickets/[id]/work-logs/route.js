@@ -14,8 +14,8 @@ function canAccess(user, ticket) {
   if (!user) return false;
   if (user.role === 'Admin') return true;
   if (user.role === 'TeamMember') {
-    if (ticket.assignedToId && ticket.assignedToId === user.id) return true;
-    if (!ticket.assignedToId && user.team && ticket.assignedTeams.includes(user.team)) return true;
+    if (ticket.assignees?.length > 0) return ticket.assignees.some(a => a.userId === user.id);
+    if (!ticket.assignees?.length && user.team && ticket.assignedTeams.includes(user.team)) return true;
   }
   return false;
 }
@@ -26,11 +26,10 @@ export async function GET(request, { params }) {
     const { id } = await params;
     const user = await getUserFromRequest(request);
 
-    const ticket = await prisma.ticket.findUnique({ where: { id } });
+    const ticket = await prisma.ticket.findUnique({ where: { id }, include: { assignees: true } });
     if (!ticket) return NextResponse.json({ error: 'Ticket not found.' }, { status: 404 });
 
     const where = { ticketId: id };
-    // Non-team members only see Client-visible logs
     if (!canAccess(user, ticket)) {
       where.visibility = 'Client';
     }
@@ -54,7 +53,7 @@ export async function POST(request, { params }) {
     const user = await getUserFromRequest(request);
     if (!user) return NextResponse.json({ error: 'Unauthorized.' }, { status: 401 });
 
-    const ticket = await prisma.ticket.findUnique({ where: { id } });
+    const ticket = await prisma.ticket.findUnique({ where: { id }, include: { assignees: true } });
     if (!ticket) return NextResponse.json({ error: 'Ticket not found.' }, { status: 404 });
 
     if (!canAccess(user, ticket)) {

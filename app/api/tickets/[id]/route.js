@@ -78,7 +78,7 @@ export async function PATCH(request, { params }) {
     if (!user) return NextResponse.json({ error: 'Unauthorized.' }, { status: 401 });
 
     const body = await request.json();
-    const { status, assignedTeams, priority, category, assignedToId } = body;
+    const { status, assignedTeams, priority, category, assignedUserIds } = body;
 
     const ticket = await prisma.ticket.findUnique({
       where:   { id },
@@ -94,7 +94,7 @@ export async function PATCH(request, { params }) {
     if (assignedTeams && user.role !== 'Admin') {
       return NextResponse.json({ error: 'Only admins can reassign teams.' }, { status: 403 });
     }
-    if (assignedToId !== undefined && user.role !== 'Admin') {
+    if (assignedUserIds !== undefined && user.role !== 'Admin') {
       return NextResponse.json({ error: 'Only admins can assign tickets to individuals.' }, { status: 403 });
     }
     if (category && user.role !== 'Admin') {
@@ -108,7 +108,6 @@ export async function PATCH(request, { params }) {
     if (ticket.status === 'Signed Off' && status && status !== 'Signed Off' && user.role !== 'Admin') {
       return NextResponse.json({ error: 'Only admins can reopen a signed-off ticket.' }, { status: 403 });
     }
-    // TeamMembers cannot set status to Resolved if ticket is already Signed Off
     if (ticket.status === 'Signed Off' && status === 'Resolved') {
       return NextResponse.json({ error: 'Cannot change a signed-off ticket back to Resolved.' }, { status: 400 });
     }
@@ -134,28 +133,36 @@ export async function PATCH(request, { params }) {
     if (priority)      updateData.priority      = priority;
     if (category)      updateData.category      = category;
 
-    // Validate assignedToId — must be an active TeamMember if provided
-    let newAssignee = null;
-    if (assignedToId !== undefined) {
-      if (assignedToId === null) {
-        // Explicit null = unassign
-        updateData.assignedToId = null;
-      } else {
-        newAssignee = await prisma.user.findUnique({
-          where:  { id: assignedToId },
-          select: { id: true, name: true, email: true, role: true, team: true, isActive: true },
-        });
-        if (!newAssignee || !newAssignee.isActive) {
-          return NextResponse.json({ error: 'Assignee not found or inactive.' }, { status: 400 });
-        }
-        updateData.assignedToId = assignedToId;
+    // Handle multi-assignee via join table
+    let newAssignees = null;
+    if (assignedUserIds !== undefined) {
+      if (!Array.isArray(assignedUserIds)) {
+        return NextResponse.json({ error: 'assignedUserIds must be an array.' }, { status: 400 });
       }
+      // Validate all user IDs exist and are active
+      if (assignedUserIds.length > 0) {
+        const users = await prisma.user.findMany({
+          where: { id: { in: assignedUserIds }, isActive: true },
+          select: { id: true, name: true, email: true, team: true },
+        });
+        if (users.length !== assignedUserIds.length) {
+          return NextResponse.json({ error: 'One or more assignees not found or inactive.' }, { status: 400 });
+        }
+        newAssignees = users;
+      } else {
+        newAssignees = [];
+      }
+      // Replace assignees via connect/disconnect
+      updateData.assignees = {
+        deleteMany: {},
+        create: assignedUserIds.map(uid => ({ userId: uid })),
+      };
     }
 
     const updated = await prisma.ticket.update({
       where:   { id },
       data:    updateData,
-      include: { assignedTo: { select: { id: true, name: true, email: true, team: true } } },
+      include: { assignees: { include: { user: { select: { id: true, name: true, email: true, team: true } } } } },
     });
 
     // ── Audit logs ────────────────────────────────────────────────────────────
@@ -209,27 +216,24 @@ export async function PATCH(request, { params }) {
       });
     }
 
-    if (assignedToId !== undefined && assignedToId !== ticket.assignedToId) {
-      if (assignedToId === null) {
+    if (assignedUserIds !== undefined && newAssignees !== null) {
+      const oldNames = (ticket.assignees || []).map(a => a.user?.name).filter(Boolean).join(', ') || 'None';
+      const newNames = newAssignees.map(u => u.name).join(', ') || 'None';
+      if (oldNames !== newNames) {
         await logActivity({
           ticketId: id,
           action:   ACTIONS.ASSIGNED_TO,
-          detail:   buildDetail.unassigned(user),
-          oldValue: ticket.assignedTo?.name ?? null,
-          newValue: null,
+          detail:   newAssignees.length === 0
+            ? buildDetail.unassigned(user)
+            : buildDetail.assignedTo(user, newNames),
+          oldValue: oldNames,
+          newValue: newNames,
           actor:    user,
         });
-      } else if (newAssignee) {
-        await logActivity({
-          ticketId: id,
-          action:   ACTIONS.ASSIGNED_TO,
-          detail:   buildDetail.assignedTo(user, newAssignee.name),
-          oldValue: ticket.assignedTo?.name ?? null,
-          newValue: newAssignee.name,
-          actor:    user,
-        });
-        // Notify the newly assigned person
-        await sendTicketAssigned(updated, newAssignee, user);
+        // Email all newly added assignees
+        const oldIds = (ticket.assignees || []).map(a => a.userId);
+        const addedAssignees = newAssignees.filter(u => !oldIds.includes(u.id));
+        await Promise.allSettled(addedAssignees.map(a => sendTicketAssigned(updated, a, user)));
       }
     }
 

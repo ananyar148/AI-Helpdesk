@@ -69,8 +69,8 @@ export default function DashboardPage() {
     return r;
   };
 
-  const assignedToMe   = user ? applyFilters(tickets.filter((t) => t.assignedToId === user.id)) : [];
-  const teamQueue      = user ? applyFilters(tickets.filter((t) => !t.assignedToId)) : [];
+  const assignedToMe   = user ? applyFilters(tickets.filter((t) => t.assignees?.some(a => a.userId === user.id))) : [];
+  const teamQueue      = user ? applyFilters(tickets.filter((t) => !t.assignees?.length)) : [];
   const hasFilters     = !!(filters.status || filters.category || filters.priority);
   const clearFilters   = () => setFilters({ status: '', category: '', priority: '' });
 

@@ -212,8 +212,8 @@ export default function TicketDetailPage() {
   const canAccess = user && ticket && (
     user.role === 'Admin' ||
     (user.role === 'TeamMember' && (
-      teams.includes(user.team) ||          // team-based access
-      ticket.assignedToId === user.id        // individually assigned
+      (ticket.assignees?.length > 0 && ticket.assignees.some(a => a.userId === user.id)) ||
+      (!ticket.assignees?.length && teams.includes(user.team))
     ))
   );
   const canDelete  = user?.role === 'Admin';
@@ -484,54 +484,57 @@ export default function TicketDetailPage() {
               </div>
             )}
 
-            {/* Assign to individual — Admin only */}
+            {/* Assign to individuals — Admin only */}
             {user.role === 'Admin' && (
               <div className="card">
                 <label className="input-label mb-2 block">Assigned To</label>
-                <select
-                  value={ticket.assignedToId ?? ''}
-                  disabled={updating}
-                  onChange={async (e) => {
-                    const val = e.target.value || null;
-                    setUpdating(true);
-                    try {
-                      const res  = await fetch(`/api/tickets/${id}`, {
-                        method:  'PATCH',
-                        headers: { 'Content-Type': 'application/json' },
-                        body:    JSON.stringify({ assignedToId: val }),
-                      });
-                      const data = await res.json();
-                      if (!res.ok) throw new Error(data.error || 'Failed');
-                      setTicket(data.ticket);
-                      setSuccess('Assigned successfully.');
-                      const aRes  = await fetch(`/api/tickets/${id}/activity`);
-                      const aData = await aRes.json();
-                      if (aRes.ok) setActivities(aData.activities);
-                      setTimeout(() => setSuccess(''), 3000);
-                    } catch (err) {
-                      setError(err.message);
-                    } finally {
-                      setUpdating(false);
-                    }
-                  }}
-                  className="input-field mt-1 text-sm"
-                >
-                  <option value="">— Unassigned —</option>
-                  {Object.entries(
-                    allUsers.reduce((acc, u) => {
-                      const t = u.team || 'Other';
-                      if (!acc[t]) acc[t] = [];
-                      acc[t].push(u);
-                      return acc;
-                    }, {})
-                  ).map(([team, members]) => (
-                    <optgroup key={team} label={team}>
-                      {members.map(u => (
-                        <option key={u.id} value={u.id}>{u.name}</option>
-                      ))}
-                    </optgroup>
-                  ))}
-                </select>
+                <div className="space-y-1.5 mb-3">
+                  {allUsers.map(u => {
+                    const isSelected = ticket.assignees?.some(a => a.userId === u.id);
+                    return (
+                      <label key={u.id} className="flex items-center gap-2.5 cursor-pointer group">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          disabled={updating}
+                          onChange={async () => {
+                            const currentIds = (ticket.assignees || []).map(a => a.userId);
+                            const newIds = isSelected
+                              ? currentIds.filter(id => id !== u.id)
+                              : [...currentIds, u.id];
+                            setUpdating(true);
+                            try {
+                              const res = await fetch(`/api/tickets/${id}`, {
+                                method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ assignedUserIds: newIds }),
+                              });
+                              const data = await res.json();
+                              if (!res.ok) throw new Error(data.error || 'Failed');
+                              setTicket(data.ticket);
+                              setSuccess('Assignees updated.');
+                              const aRes = await fetch(`/api/tickets/${id}/activity`);
+                              const aData = await aRes.json();
+                              if (aRes.ok) setActivities(aData.activities);
+                              setTimeout(() => setSuccess(''), 3000);
+                            } catch (err) { setError(err.message); }
+                            finally { setUpdating(false); }
+                          }}
+                          className="accent-blue-600 w-4 h-4"
+                        />
+                        <span className="inline-flex items-center gap-1.5 text-sm text-gray-700">
+                          <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-700 inline-flex items-center justify-center text-xs font-bold">
+                            {u.name.charAt(0).toUpperCase()}
+                          </span>
+                          {u.name}
+                          {u.team && <span className="text-xs text-gray-400">· {u.team}</span>}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+                {ticket.assignees?.length === 0 && (
+                  <p className="text-xs text-gray-400 italic">No individual assignees — visible to full team</p>
+                )}
               </div>
             )}
 
@@ -549,16 +552,20 @@ export default function TicketDetailPage() {
               </div>
 
               {/* Assigned To */}
-              <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+              <div className="flex items-start gap-1.5 flex-wrap pt-0.5">
                 <span className="font-medium text-gray-600">Assigned To:</span>
-                {ticket.assignedTo ? (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 text-blue-700 rounded-full font-medium">
-                    <span className="w-3.5 h-3.5 rounded-full bg-blue-200 text-blue-800 inline-flex items-center justify-center text-xs font-bold flex-shrink-0">
-                      {ticket.assignedTo.name.charAt(0).toUpperCase()}
-                    </span>
-                    {ticket.assignedTo.name}
-                    {ticket.assignedTo.team && <span className="text-blue-400 font-normal">· {ticket.assignedTo.team}</span>}
-                  </span>
+                {ticket.assignees?.length > 0 ? (
+                  <div className="flex flex-wrap gap-1">
+                    {ticket.assignees.map(a => (
+                      <span key={a.userId} className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 text-blue-700 rounded-full font-medium text-xs">
+                        <span className="w-3.5 h-3.5 rounded-full bg-blue-200 text-blue-800 inline-flex items-center justify-center font-bold flex-shrink-0">
+                          {(a.user?.name || '?').charAt(0).toUpperCase()}
+                        </span>
+                        {a.user?.name || a.userId}
+                        {a.user?.team && <span className="text-blue-400 font-normal">· {a.user.team}</span>}
+                      </span>
+                    ))}
+                  </div>
                 ) : (
                   <span className="text-gray-400 italic">Unassigned</span>
                 )}
