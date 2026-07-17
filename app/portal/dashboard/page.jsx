@@ -537,12 +537,13 @@ export default function PortalDashboard() {
     }
   }, [authChecked, status, clientUser, router]);
 
-  // Determine the active user from whichever auth method succeeded
-  const isGoogleUser  = status === 'authenticated';
-  const activeUser    = isGoogleUser
-    ? { name: session.user.name, email: session.user.email, image: session.user.image }
-    : clientUser
-      ? { name: clientUser.name, email: clientUser.email, image: null }
+  // Prefer email/password (client_token) over Google — if both exist, client_token wins
+  // This ensures switching accounts via login page works correctly
+  const isGoogleUser  = status === 'authenticated' && !clientUser;
+  const activeUser    = clientUser
+    ? { name: clientUser.name, email: clientUser.email, image: null }
+    : isGoogleUser
+      ? { name: session.user.name, email: session.user.email, image: session.user.image }
       : null;
 
   const isReady = authChecked && (isGoogleUser || !!clientUser);
@@ -556,7 +557,7 @@ export default function PortalDashboard() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to load tickets');
       setTickets(data.tickets || []);
-    } catch (err) {
+    } catch (err) { 
       setError(err.message);
     } finally {
       setLoading(false);
@@ -575,11 +576,13 @@ export default function PortalDashboard() {
   };
 
   const handleSignOut = async () => {
-    if (isGoogleUser) {
-      signOut({ callbackUrl: '/portal/login' });
-    } else {
+    if (clientUser) {
+      // Email/password session — clear client_token cookie
       await fetch('/api/portal/client-auth/logout', { method: 'POST' });
       router.push('/portal/login');
+    } else {
+      // Google session
+      signOut({ callbackUrl: '/portal/login' });
     }
   };
 

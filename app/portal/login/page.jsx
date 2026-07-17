@@ -6,10 +6,10 @@
  * On success → redirects to /portal/dashboard.
  */
 
-import { useState }   from 'react';
-import { signIn }     from 'next-auth/react';
-import { useRouter }  from 'next/navigation';
-import Link           from 'next/link';
+import { useState }        from 'react';
+import { signIn, signOut } from 'next-auth/react';
+import { useRouter }       from 'next/navigation';
+import Link                from 'next/link';
 import LoadingSpinner from '../../components/LoadingSpinner';
 
 export default function ClientLoginPage() {
@@ -28,6 +28,12 @@ export default function ClientLoginPage() {
 
     setLoading(true);
     try {
+      // Clear any existing sessions first — both email/password cookie AND Google OAuth
+      await Promise.allSettled([
+        fetch('/api/portal/client-auth/logout', { method: 'POST' }),
+        signOut({ redirect: false }),
+      ]);
+
       const res  = await fetch('/api/portal/client-auth/login', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },

@@ -4519,106 +4519,6 @@ export async function POST(request, { params }) {
 }
 </file>
 
-<file path="app/api/tickets/[id]/work-logs/route.js">
-/**
- * /api/tickets/[id]/work-logs
- * GET  - Fetch work logs (TeamMember sees Internal+Client; client sees Client only)
- * POST - Add a work log (TeamMember own team | Admin)
- */
-
-import { NextResponse } from 'next/server';
-import prisma from '../../../../../lib/prisma';
-import { getUserFromRequest } from '../../../../../lib/auth';
-import { sendWorkLogAddedAdmin } from '../../../../../lib/mailer';
-
-/** Returns true if the user can access this ticket (team OR individual assignment) */
-function canAccess(user, ticket) {
-  if (!user) return false;
-  if (user.role === 'Admin') return true;
-  if (user.role === 'TeamMember') {
-    if (ticket.assignees?.length > 0) return ticket.assignees.some(a => a.userId === user.id);
-    if (!ticket.assignees?.length && user.team && ticket.assignedTeams.includes(user.team)) return true;
-  }
-  return false;
-}
-
-// GET /api/tickets/[id]/work-logs
-export async function GET(request, { params }) {
-  try {
-    const { id } = await params;
-    const user = await getUserFromRequest(request);
-
-    const ticket = await prisma.ticket.findUnique({ where: { id }, include: { assignees: true } });
-    if (!ticket) return NextResponse.json({ error: 'Ticket not found.' }, { status: 404 });
-
-    const where = { ticketId: id };
-    if (!canAccess(user, ticket)) {
-      where.visibility = 'Client';
-    }
-
-    const workLogs = await prisma.ticketWorkLog.findMany({
-      where,
-      orderBy: { createdAt: 'asc' },
-    });
-
-    return NextResponse.json({ workLogs });
-  } catch (err) {
-    console.error('GET work-logs error:', err);
-    return NextResponse.json({ error: 'Failed to fetch work logs.' }, { status: 500 });
-  }
-}
-
-// POST /api/tickets/[id]/work-logs
-export async function POST(request, { params }) {
-  try {
-    const { id } = await params;
-    const user = await getUserFromRequest(request);
-    if (!user) return NextResponse.json({ error: 'Unauthorized.' }, { status: 401 });
-
-    const ticket = await prisma.ticket.findUnique({ where: { id }, include: { assignees: true } });
-    if (!ticket) return NextResponse.json({ error: 'Ticket not found.' }, { status: 404 });
-
-    if (!canAccess(user, ticket)) {
-      return NextResponse.json({ error: 'Access denied.' }, { status: 403 });
-    }
-
-    const body = await request.json();
-    const { note, visibility = 'Internal' } = body;
-
-    if (!note || note.trim().length < 3) {
-      return NextResponse.json({ error: 'Note must be at least 3 characters.' }, { status: 400 });
-    }
-
-    const validVisibilities = ['Internal', 'Client'];
-    if (!validVisibilities.includes(visibility)) {
-      return NextResponse.json({ error: 'Visibility must be Internal or Client.' }, { status: 400 });
-    }
-
-    const workLog = await prisma.ticketWorkLog.create({
-      data: {
-        ticketId:   id,
-        userId:     user.id,
-        userName:   user.name,
-        userRole:   user.role,
-        team:       user.team || null,
-        note:       note.trim(),
-        visibility,
-      },
-    });
-
-    // Notify admin (non-blocking, skips self-notification)
-    sendWorkLogAddedAdmin(ticket, workLog, user)
-      .then(r => { if (!r.sent) console.log('[work-log] Admin email skipped:', r.reason); })
-      .catch(err => console.error('[work-log] Admin email error:', err.message));
-
-    return NextResponse.json({ success: true, workLog }, { status: 201 });
-  } catch (err) {
-    console.error('POST work-logs error:', err);
-    return NextResponse.json({ error: 'Failed to add work log.' }, { status: 500 });
-  }
-}
-</file>
-
 <file path="app/page.jsx">
 import { redirect } from 'next/navigation';
 
@@ -5248,579 +5148,103 @@ export async function POST(request) {
 }
 </file>
 
-<file path="app/dashboard/page.jsx">
-'use client';
-
+<file path="app/api/tickets/[id]/work-logs/route.js">
 /**
- * Team Dashboard — /dashboard
- * Tickets split into two sections:
- *   1. Assigned to Me  — tickets where assignedToId === this user's id
- *   2. Team Queue      — tickets on the team's queue with no individual assignee
+ * /api/tickets/[id]/work-logs
+ * GET  - Fetch work logs (TeamMember sees Internal+Client; client sees Client only)
+ * POST - Add a work log (TeamMember own team | Admin)
  */
 
-import { useState, useEffect, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
-import Navbar from '../components/Navbar';
-import TicketTable from '../components/TicketTable';
-import StatsCards from '../components/StatsCards';
-import FilterBar from '../components/FilterBar';
-import LoadingSpinner from '../components/LoadingSpinner';
-import { TeamBadge } from '../components/StatusBadge';
+import { NextResponse } from 'next/server';
+import prisma from '../../../../../lib/prisma';
+import { getUserFromRequest } from '../../../../../lib/auth';
+import { sendWorkLogAddedAdmin } from '../../../../../lib/mailer';
 
-export default function DashboardPage() {
-  const router = useRouter();
-  const [user,            setUser]            = useState(null);
-  const [tickets,         setTickets]         = useState([]);
-  const [loading,         setLoading]         = useState(true);
-  const [error,           setError]           = useState('');
-  const [filters,         setFilters]         = useState({ status: '', category: '', priority: '' });
-
-  // Fetch current user
-  useEffect(() => {
-    fetch('/api/team-auth/me')
-      .then((r) => (r.ok ? r.json() : Promise.reject()))
-      .then((data) => {
-        if (!data.user) { router.push('/login'); return; }
-        if (data.user.role === 'Admin') { router.push('/admin'); return; }
-        setUser(data.user);
-      })
-      .catch(() => router.push('/login'));
-  }, [router]);
-
-  const fetchTickets = useCallback(async () => {
-    if (!user) return;
-    setLoading(true);
-    setError('');
-    try {
-      const res  = await fetch('/api/tickets');
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to load tickets');
-      setTickets(data.tickets);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  }, [user]);
-
-  useEffect(() => { fetchTickets(); }, [fetchTickets]);
-
-  const handleTicketDeleted = (deletedId) =>
-    setTickets((prev) => prev.filter((t) => t.id !== deletedId));
-
-  const handleFilterChange = (key, value) =>
-    setFilters((prev) => ({ ...prev, [key]: value }));
-
-  // ── Split tickets ──────────────────────────────────────────────────────────
-  const applyFilters = (list) => {
-    let r = [...list];
-    if (filters.status)   r = r.filter((t) => t.status   === filters.status);
-    if (filters.category) r = r.filter((t) => t.category === filters.category);
-    if (filters.priority) r = r.filter((t) => t.priority === filters.priority);
-    return r;
-  };
-
-  const assignedToMe   = user ? applyFilters(tickets.filter((t) => t.assignees?.some(a => a.userId === user.id))) : [];
-  const teamQueue      = user ? applyFilters(tickets.filter((t) => !t.assignees?.length)) : [];
-  const hasFilters     = !!(filters.status || filters.category || filters.priority);
-  const clearFilters   = () => setFilters({ status: '', category: '', priority: '' });
-
-  if (!user) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <LoadingSpinner size="lg" />
-      </div>
-    );
+/** Returns true if the user can access this ticket (team OR individual assignment) */
+function canAccess(user, ticket) {
+  if (!user) return false;
+  if (user.role === 'Admin') return true;
+  if (user.role === 'TeamMember') {
+    if (ticket.assignees?.length > 0) return ticket.assignees.some(a => a.userId === user.id);
+    if (!ticket.assignees?.length && user.team && ticket.assignedTeams.includes(user.team)) return true;
   }
-
-  return (
-    <div className="min-h-screen bg-gray-50">
-      <Navbar />
-
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
-          <div>
-            <div className="flex items-center gap-3 mb-1">
-              <h1 className="text-2xl font-bold text-gray-900">Team Dashboard</h1>
-              {user.team && <TeamBadge team={user.team} />}
-            </div>
-            <p className="text-gray-500 text-sm">
-              Welcome back, <span className="font-medium text-gray-700">{user.name}</span>.
-              {user.team ? ` Showing tickets for the ${user.team} team.` : ' Showing all assigned tickets.'}
-            </p>
-          </div>
-          <button onClick={fetchTickets} disabled={loading}
-            className="btn-secondary self-start sm:self-auto" aria-label="Refresh tickets">
-            {loading ? <LoadingSpinner size="sm" /> : (
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
-              </svg>
-            )}
-            Refresh
-          </button>
-        </div>
-
-        {error && (
-          <div className="alert-error mb-6 flex items-center gap-2">
-            <svg className="w-4 h-4 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd"/>
-            </svg>
-            {error}
-            <button onClick={fetchTickets} className="ml-auto text-xs underline">Retry</button>
-          </div>
-        )}
-
-        {loading && tickets.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-24 gap-3">
-            <LoadingSpinner size="lg" />
-            <p className="text-gray-500 text-sm">Loading tickets…</p>
-          </div>
-        ) : (
-          <>
-            {/* Stats — based on all tickets this user can see */}
-            <div className="mb-8">
-              <StatsCards tickets={tickets} />
-            </div>
-
-            {/* Shared filter bar */}
-            <div className="flex justify-end mb-4">
-              <FilterBar filters={filters} onChange={handleFilterChange} isAdmin={false} />
-            </div>
-
-            {/* ── Section 1: Assigned to Me ──────────────────────────────── */}
-            <div className="mb-8">
-              <div className="flex items-center gap-3 mb-3">
-                <h2 className="text-base font-semibold text-gray-900">
-                  Assigned to Me
-                </h2>
-                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium
-                  ${assignedToMe.length > 0 ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500'}`}>
-                  {assignedToMe.length}
-                </span>
-                {assignedToMe.length > 0 && (
-                  <span className="text-xs text-blue-600 font-medium flex items-center gap-1">
-                    <span className="w-2 h-2 rounded-full bg-blue-500 inline-block" />
-                    Action required
-                  </span>
-                )}
-              </div>
-
-              <div className="card">
-                <TicketTable
-                  tickets={assignedToMe}
-                  isAdmin={false}
-                  userRole={user.role}
-                  userTeam={user.team}
-                  hasActiveFilters={hasFilters}
-                  onClearFilters={clearFilters}
-                  onTicketDeleted={handleTicketDeleted}
-                />
-              </div>
-            </div>
-
-            {/* ── Section 2: Team Queue (unassigned) ────────────────────── */}
-            <div>
-              <div className="flex items-center gap-3 mb-3">
-                <h2 className="text-base font-semibold text-gray-900">
-                  {user.team ? `${user.team} Team Queue` : 'Team Queue'}
-                </h2>
-                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium
-                  ${teamQueue.length > 0 ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-500'}`}>
-                  {teamQueue.length}
-                </span>
-                <span className="text-xs text-gray-400">Unassigned — available to any team member</span>
-              </div>
-
-              <div className="card">
-                <TicketTable
-                  tickets={teamQueue}
-                  isAdmin={false}
-                  userRole={user.role}
-                  userTeam={user.team}
-                  hasActiveFilters={hasFilters}
-                  onClearFilters={clearFilters}
-                  onTicketDeleted={handleTicketDeleted}
-                />
-              </div>
-            </div>
-          </>
-        )}
-      </main>
-    </div>
-  );
-}
-</file>
-
-<file path="lib/classifier.js">
-/**
- * AI Classification Pipeline
- *
- *   Step 1 — Custom rule-based algorithm → category, team, priority + confidence score
- *   Step 2 — Cache/DB check → if near-identical issue seen recently, reuse (skip AI call)
- *   Step 3 — High confidence: keep custom classification, call Vertex AI for draft only
- *             Low confidence:  call Vertex AI for full classification + draft
- *   Step 4 — Fallback to custom result + template draft if Vertex AI unavailable
- *
- * Uses @google/genai with Vertex AI backend (service account via GOOGLE_SERVICE_ACCOUNT_JSON)
- */
-
-import { buildGoogleAIClient } from './googleai';
-
-// ─── Constants ────────────────────────────────────────────────────────────────
-
-const CATEGORIES = ['Billing', 'Bug', 'Feature Request', 'HR', 'Other'];
-const TEAMS      = ['Development', 'Billing', 'HR', 'Support'];
-const PRIORITIES = ['Low', 'Medium', 'High'];
-
-const HIGH_CONFIDENCE_THRESHOLD = 0.70;
-
-// ─── Step 1: Custom Rule-Based Classifier ────────────────────────────────────
-
-const RULES = [
-  {
-    phrases: [
-      'charged twice', 'double charge', 'duplicate charge', 'overcharged',
-      'wrong amount', 'incorrect charge', 'payment failed', 'payment declined',
-      'payment issue', 'refund request', 'refund my', 'billing error',
-      'credit card', 'debit card', 'money back', 'subscription charge',
-      'subscription cancelled', 'invoice payment', 'invoice issue', 'invoice problem',
-      'invoice related', 'billing issue', 'billing problem', 'billing query',
-      'pay for', 'charged for', 'invoice',
-    ],
-    category: 'Billing', team: 'Billing', priority: 'High', weight: 3.0,
-  },
-  {
-    phrases: [
-      'not working', 'not loading', 'not showing', 'not displaying', 'not visible',
-      'not found', 'cannot login', "can't login", 'login failed', 'login error',
-      'page crash', 'app crash', 'crashes when', 'blank screen', 'white screen',
-      'error 500', 'error 404', '500 error', '404 error', 'internal server error',
-      'throws error', 'getting error', 'shows error', 'exception',
-      'broken', 'not responding', 'keeps freezing', 'not opening',
-      'fails to load', 'failed to', 'stuck on', 'missing data', 'data not',
-      'records not', 'button not',
-    ],
-    category: 'Bug', team: 'Development', priority: 'High', weight: 3.0,
-  },
-  {
-    phrases: [
-      'feature request', 'please add', 'can you add', 'would like to have',
-      'would be great', 'suggest adding', 'nice to have',
-      'dark mode', 'add support for', 'add the ability', 'new feature',
-      'could you implement', 'enhancement', 'improvement request',
-    ],
-    category: 'Feature Request', team: 'Development', priority: 'Low', weight: 2.5,
-  },
-  {
-    phrases: [
-      'leave request', 'annual leave', 'sick leave', 'maternity leave',
-      'paternity leave', 'leave balance', 'leave approval', 'leave pending',
-      'payroll issue', 'salary problem', 'salary discrepancy', 'wrong salary',
-      'hr policy', 'hr team', 'onboarding', 'offboarding',
-      'performance review', 'promotion request', 'contract issue', 'benefits',
-    ],
-    category: 'HR', team: 'HR', priority: 'Medium', weight: 3.0,
-  },
-  {
-    phrases: [
-      'how do i', 'how to', 'i need help', 'need assistance',
-      'forgot password', 'password reset', 'reset my password', 'lost access',
-      'account locked', 'cannot access', 'set up', 'configure',
-      'getting started', 'user guide', 'documentation', 'tutorial',
-    ],
-    category: 'Other', team: 'Support', priority: 'Low', weight: 1.5,
-  },
-];
-
-const PRIORITY_OVERRIDES = {
-  High: ['urgent', 'critical', 'asap', 'immediately', 'emergency', 'blocking',
-         'cannot work', 'production down', 'data loss', 'security issue', 'severe'],
-  Low:  ['minor', 'not urgent', 'nice to have', 'eventually', 'low priority'],
-};
-
-function normalise(text) {
-  return text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ');
+  return false;
 }
 
-function countPhraseMatches(text, phrases) {
-  const n = normalise(text);
-  return phrases.filter(p => n.includes(p)).length;
-}
-
-function customClassify(subject, description) {
-  const text   = `${subject} ${description}`;
-  const scores = {};
-
-  console.log('\n┌─────────────────────────────────────────────────────────');
-  console.log(`│ [classifier] Rule-based scan`);
-  console.log(`│ Subject     : "${subject}"`);
-  console.log(`│ Description : "${description.substring(0, 80)}${description.length > 80 ? '…' : ''}"`);
-  console.log('├─────────────────────────────────────────────────────────');
-
-  for (const rule of RULES) {
-    const matched = rule.phrases.filter(p => normalise(text).includes(p));
-    if (matched.length > 0) {
-      const contribution = matched.length * rule.weight;
-      scores[rule.category] = (scores[rule.category] || 0) + contribution;
-      console.log(`│  ✓ [${rule.category.padEnd(16)}] matched ${matched.length} phrase(s) × weight ${rule.weight} = +${contribution.toFixed(1)}`);
-      console.log(`│    phrases: ${matched.map(p => `"${p}"`).join(', ')}`);
-    } else {
-      console.log(`│  ✗ [${rule.category.padEnd(16)}] no matches`);
-    }
-  }
-
-  if (Object.keys(scores).length === 0) {
-    console.log('│  → No rule matched → fallback: Other / Support / Medium / conf=0');
-    console.log('└─────────────────────────────────────────────────────────\n');
-    return { category: 'Other', team: 'Support', priority: 'Medium', confidence: 0 };
-  }
-
-  const sorted     = Object.entries(scores).sort((a, b) => b[1] - a[1]);
-  const [topCat, topScore] = sorted[0];
-  const totalScore = sorted.reduce((s, [, v]) => s + v, 0);
-  const confidence = totalScore > 0 ? topScore / totalScore : 0;
-
-  console.log('├─────────────────────────────────────────────────────────');
-  console.log('│  Score board:');
-  sorted.forEach(([cat, score]) => {
-    const pct   = ((score / totalScore) * 100).toFixed(1);
-    const bar   = '█'.repeat(Math.round(score / totalScore * 20));
-    const arrow = cat === topCat ? ' ◄ winner' : '';
-    console.log(`│    ${cat.padEnd(18)} ${score.toFixed(1).padStart(5)} pts  ${pct.padStart(5)}%  ${bar}${arrow}`);
-  });
-
-  const rule   = RULES.find(r => r.category === topCat);
-  let priority = rule?.priority ?? 'Medium';
-
-  const highOverrides = PRIORITY_OVERRIDES.High.filter(p => normalise(text).includes(p));
-  const lowOverrides  = PRIORITY_OVERRIDES.Low.filter(p  => normalise(text).includes(p));
-
-  if (highOverrides.length > 0) {
-    priority = 'High';
-    console.log(`│  ⚡ Priority override → High  (matched: ${highOverrides.map(p => `"${p}"`).join(', ')})`);
-  } else if (lowOverrides.length > 0) {
-    priority = 'Low';
-    console.log(`│  ⬇ Priority override → Low   (matched: ${lowOverrides.map(p => `"${p}"`).join(', ')})`);
-  } else {
-    console.log(`│  Priority from rule: ${priority}`);
-  }
-
-  console.log('├─────────────────────────────────────────────────────────');
-  console.log(`│  Result  : category=${topCat}  team=${rule?.team ?? 'Support'}  priority=${priority}`);
-  console.log(`│  Confidence: ${(confidence * 100).toFixed(1)}%  (${topScore.toFixed(1)} / ${totalScore.toFixed(1)})`);
-  console.log('└─────────────────────────────────────────────────────────\n');
-
-  return { category: topCat, team: rule?.team ?? 'Support', priority, confidence };
-}
-
-// ─── Step 2: Cache / Near-Duplicate Check ────────────────────────────────────
-
-function tokenise(text) {
-  return text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean);
-}
-
-function similarity(a, b) {
-  const setA = new Set(tokenise(a));
-  const setB = new Set(tokenise(b));
-  const inter = new Set([...setA].filter(x => setB.has(x)));
-  const union = new Set([...setA, ...setB]);
-  return union.size === 0 ? 0 : inter.size / union.size;
-}
-
-export function findNearDuplicate(subject, description, existingTickets) {
-  const newText = `${subject} ${description}`;
-  for (const ticket of existingTickets) {
-    if (similarity(newText, `${ticket.subject} ${ticket.description}`) >= 0.70) {
-      console.log(`[classifier] Cache hit — reusing ticket ${ticket.id}`);
-      return ticket;
-    }
-  }
-  return null;
-}
-
-// ─── Step 3: Vertex AI via @google/genai ─────────────────────────────────────
-
-function buildClient() {
-  const { ai, error } = buildGoogleAIClient();
-  if (!ai) {
-    console.warn(`[classifier] Vertex AI client not configured: ${error}`);
-  }
-  return ai;
-}
-
-async function callVertexAI(subject, description, hintCategory = null, hintTeam = null) {
-  const ai = buildClient();
-  if (!ai) {
-    console.warn('[classifier] ⚠ Vertex AI client not configured');
-    return null;
-  }
-
-  const mode = hintCategory ? 'DRAFT ONLY (high-confidence hint)' : 'FULL CLASSIFICATION';
-  console.log(`\n┌─ [classifier] Vertex AI call ─────────────────────────────`);
-  console.log(`│  Mode    : ${mode}`);
-  if (hintCategory) {
-    console.log(`│  Hint    : category="${hintCategory}"  team="${hintTeam}"`);
-  }
-  console.log(`│  Subject : "${subject}"`);
-
+// GET /api/tickets/[id]/work-logs
+export async function GET(request, { params }) {
   try {
-    const hint = hintCategory
-      ? `\nOur rule-based classifier is HIGHLY confident this is "${hintCategory}" → "${hintTeam}". Agree unless clearly wrong.`
-      : '';
+    const { id } = await params;
+    const user = await getUserFromRequest(request);
 
-    const prompt = `You are a support ticket classifier for a B2B software company.
+    const ticket = await prisma.ticket.findUnique({ where: { id }, include: { assignees: true } });
+    if (!ticket) return NextResponse.json({ error: 'Ticket not found.' }, { status: 404 });
 
-Team responsibilities:
-- Development: bugs, UI errors, crashes, pages not loading/showing, feature requests, anything technical
-- Billing: ONLY actual payment problems (wrong charges, refunds, payment failures, billing disputes)
-- HR: leave requests, payroll/salary issues, HR policies, employee contracts, benefits
-- Support: general how-to, password reset, account access, documentation
+    const where = { ticketId: id };
+    if (!canAccess(user, ticket)) {
+      where.visibility = 'Client';
+    }
 
-Critical rules:
-1. "Invoice not showing in dashboard" = Development (UI/display bug, NOT a Billing issue)
-2. "Charged twice / wrong charge / refund" = Billing (actual money problem)
-3. Any crash, error, blank screen, missing data = Development${hint}
+    const workLogs = await prisma.ticketWorkLog.findMany({
+      where,
+      orderBy: { createdAt: 'asc' },
+    });
 
-Return valid JSON matching this exact schema:
-{
-  "category": one of [${CATEGORIES.map(c => `"${c}"`).join(', ')}],
-  "priority": one of [${PRIORITIES.map(p => `"${p}"`).join(', ')}],
-  "assignedTeam": one of [${TEAMS.map(t => `"${t}"`).join(', ')}],
-  "draftResponse": "professional 2-3 sentence empathetic response to the client"
+    return NextResponse.json({ workLogs });
+  } catch (err) {
+    console.error('GET work-logs error:', err);
+    return NextResponse.json({ error: 'Failed to fetch work logs.' }, { status: 500 });
+  }
 }
 
-Subject: ${subject}
-Description: ${description}`;
+// POST /api/tickets/[id]/work-logs
+export async function POST(request, { params }) {
+  try {
+    const { id } = await params;
+    const user = await getUserFromRequest(request);
+    if (!user) return NextResponse.json({ error: 'Unauthorized.' }, { status: 401 });
 
-    const response = await ai.models.generateContent({
-      model:    'gemini-3.5-flash',
-      contents: prompt,
-      config: {
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: 'object',
-          properties: {
-            category:      { type: 'string', enum: CATEGORIES },
-            priority:      { type: 'string', enum: PRIORITIES },
-            assignedTeam:  { type: 'string', enum: TEAMS },
-            draftResponse: { type: 'string' },
-          },
-          required: ['category', 'priority', 'assignedTeam', 'draftResponse'],
-        },
-        temperature: 0.1,
+    const ticket = await prisma.ticket.findUnique({ where: { id }, include: { assignees: true } });
+    if (!ticket) return NextResponse.json({ error: 'Ticket not found.' }, { status: 404 });
+
+    if (!canAccess(user, ticket)) {
+      return NextResponse.json({ error: 'Access denied.' }, { status: 403 });
+    }
+
+    const body = await request.json();
+    const { note, visibility = 'Internal' } = body;
+
+    if (!note || note.trim().length < 3) {
+      return NextResponse.json({ error: 'Note must be at least 3 characters.' }, { status: 400 });
+    }
+
+    const validVisibilities = ['Internal', 'Client'];
+    if (!validVisibilities.includes(visibility)) {
+      return NextResponse.json({ error: 'Visibility must be Internal or Client.' }, { status: 400 });
+    }
+
+    const workLog = await prisma.ticketWorkLog.create({
+      data: {
+        ticketId:   id,
+        userId:     user.id,
+        userName:   user.name,
+        userRole:   user.role,
+        team:       user.team || null,
+        note:       note.trim(),
+        visibility,
       },
     });
 
-    const text   = response.text;
-    const parsed = JSON.parse(text);
+    // Notify admin (non-blocking, skips self-notification)
+    sendWorkLogAddedAdmin(ticket, workLog, user)
+      .then(r => { if (!r.sent) console.log('[work-log] Admin email skipped:', r.reason); })
+      .catch(err => console.error('[work-log] Admin email error:', err.message));
 
-    console.log(`│  Result  : category=${parsed.category}  team=${parsed.assignedTeam}  priority=${parsed.priority}`);
-    console.log(`│  Draft   : "${(parsed.draftResponse || '').substring(0, 60)}…"`);
-    console.log(`└────────────────────────────────────────────────────────────\n`);
-
-    return {
-      category:      CATEGORIES.includes(parsed.category)     ? parsed.category     : 'Other',
-      assignedTeam:  TEAMS.includes(parsed.assignedTeam)       ? parsed.assignedTeam : 'Support',
-      priority:      PRIORITIES.includes(parsed.priority)      ? parsed.priority     : 'Medium',
-      draftResponse: parsed.draftResponse || '',
-    };
+    return NextResponse.json({ success: true, workLog }, { status: 201 });
   } catch (err) {
-    console.error(`│  ✗ ERROR : ${err.message}`);
-    console.log(`└────────────────────────────────────────────────────────────\n`);
-    return null;
+    console.error('POST work-logs error:', err);
+    return NextResponse.json({ error: 'Failed to add work log.' }, { status: 500 });
   }
-}
-
-// ─── Fallback Draft ───────────────────────────────────────────────────────────
-
-function fallbackDraft(category, subject) {
-  const drafts = {
-    Billing:           `Thank you for reaching out about a billing concern. Our billing team will review your account and respond within 1–2 business days.`,
-    Bug:               `Thank you for reporting this issue with "${subject}". Our development team has been notified and will investigate promptly.`,
-    'Feature Request': `Thank you for your suggestion regarding "${subject}". We've logged it for our product team to evaluate.`,
-    HR:                `Thank you for contacting HR about "${subject}". Our HR team will respond within 1 business day.`,
-    Other:             `Thank you for contacting support. A team member will review "${subject}" and respond within 24–48 hours.`,
-  };
-  return drafts[category] || drafts.Other;
-}
-
-// ─── Main Entry Point ─────────────────────────────────────────────────────────
-
-export async function classifyTicket(subject, description, existingTickets = []) {
-
-  // Step 2: Cache check
-  const cached = findNearDuplicate(subject, description, existingTickets);
-  if (cached) {
-    console.log(`\n[classifier] 🗄 Cache hit — reusing classification from ticket #${cached.ticketNumber ?? cached.id}`);
-    console.log(`             category=${cached.category}  team=${cached.assignedTeams?.[0]}  priority=${cached.priority}\n`);
-    return {
-      category:        cached.category,
-      assignedTeam:    cached.assignedTeams?.[0] || cached.assignedTeam || 'Support',
-      assignedTeams:   cached.assignedTeams || [cached.assignedTeam || 'Support'],
-      priority:        cached.priority,
-      draftResponse:   cached.draftResponse || fallbackDraft(cached.category, subject),
-      source:          'cache',
-      confidenceScore: null,
-    };
-  }
-
-  // Step 1: Custom classifier
-  const custom = customClassify(subject, description);
-  const needsFullClassification = custom.confidence < HIGH_CONFIDENCE_THRESHOLD;
-
-  if (needsFullClassification) {
-    console.log(`[classifier] 🤖 Confidence ${(custom.confidence * 100).toFixed(1)}% < ${HIGH_CONFIDENCE_THRESHOLD * 100}% threshold → Vertex AI: FULL classification`);
-  } else {
-    console.log(`[classifier] ✅ Confidence ${(custom.confidence * 100).toFixed(1)}% ≥ ${HIGH_CONFIDENCE_THRESHOLD * 100}% threshold → Vertex AI: DRAFT only`);
-  }
-
-  // Step 3: Call Vertex AI
-  const aiResult = await callVertexAI(
-    subject, description,
-    needsFullClassification ? null : custom.category,
-    needsFullClassification ? null : custom.team,
-  );
-
-  if (aiResult) {
-    if (needsFullClassification) {
-      console.log(`[classifier] 📋 Final (vertex-ai): category=${aiResult.category}  team=${aiResult.assignedTeam}  priority=${aiResult.priority}`);
-      return {
-        category:        aiResult.category,
-        assignedTeam:    aiResult.assignedTeam,
-        assignedTeams:   [aiResult.assignedTeam],
-        priority:        aiResult.priority,
-        draftResponse:   aiResult.draftResponse,
-        source:          'vertex-ai',
-        confidenceScore: custom.confidence, // rule-based score (low — that's why AI took over)
-      };
-    }
-    console.log(`[classifier] 📋 Final (custom+vertex-draft): category=${custom.category}  team=${custom.team}  priority=${custom.priority}`);
-    return {
-      category:        custom.category,
-      assignedTeam:    custom.team,
-      assignedTeams:   [custom.team],
-      priority:        custom.priority,
-      draftResponse:   aiResult.draftResponse,
-      source:          'custom+vertex-draft',
-      confidenceScore: custom.confidence,
-    };
-  }
-
-  // Step 4: Fallback
-  console.warn(`[classifier] ⚠ Vertex AI unavailable — using custom-fallback`);
-  console.log(`[classifier] 📋 Final (custom-fallback): category=${custom.category}  team=${custom.team}  priority=${custom.priority}`);
-  return {
-    category:        custom.category,
-    assignedTeam:    custom.team,
-    assignedTeams:   [custom.team],
-    priority:        custom.priority,
-    draftResponse:   fallbackDraft(custom.category, subject),
-    source:          'custom-fallback',
-    confidenceScore: custom.confidence,
-  };
 }
 </file>
 
@@ -6527,6 +5951,212 @@ export default function Navbar() {
 }
 </file>
 
+<file path="app/dashboard/page.jsx">
+'use client';
+
+/**
+ * Team Dashboard — /dashboard
+ * Tickets split into two sections:
+ *   1. Assigned to Me  — tickets where assignedToId === this user's id
+ *   2. Team Queue      — tickets on the team's queue with no individual assignee
+ */
+
+import { useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
+import Navbar from '../components/Navbar';
+import TicketTable from '../components/TicketTable';
+import StatsCards from '../components/StatsCards';
+import FilterBar from '../components/FilterBar';
+import LoadingSpinner from '../components/LoadingSpinner';
+import { TeamBadge } from '../components/StatusBadge';
+
+export default function DashboardPage() {
+  const router = useRouter();
+  const [user,            setUser]            = useState(null);
+  const [tickets,         setTickets]         = useState([]);
+  const [loading,         setLoading]         = useState(true);
+  const [error,           setError]           = useState('');
+  const [filters,         setFilters]         = useState({ status: '', category: '', priority: '' });
+
+  // Fetch current user
+  useEffect(() => {
+    fetch('/api/team-auth/me')
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((data) => {
+        if (!data.user) { router.push('/login'); return; }
+        if (data.user.role === 'Admin') { router.push('/admin'); return; }
+        setUser(data.user);
+      })
+      .catch(() => router.push('/login'));
+  }, [router]);
+
+  const fetchTickets = useCallback(async () => {
+    if (!user) return;
+    setLoading(true);
+    setError('');
+    try {
+      const res  = await fetch('/api/tickets');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to load tickets');
+      setTickets(data.tickets);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [user]);
+
+  useEffect(() => { fetchTickets(); }, [fetchTickets]);
+
+  const handleTicketDeleted = (deletedId) =>
+    setTickets((prev) => prev.filter((t) => t.id !== deletedId));
+
+  const handleFilterChange = (key, value) =>
+    setFilters((prev) => ({ ...prev, [key]: value }));
+
+  // ── Split tickets ──────────────────────────────────────────────────────────
+  const applyFilters = (list) => {
+    let r = [...list];
+    if (filters.status)   r = r.filter((t) => t.status   === filters.status);
+    if (filters.category) r = r.filter((t) => t.category === filters.category);
+    if (filters.priority) r = r.filter((t) => t.priority === filters.priority);
+    return r;
+  };
+
+  const assignedToMe   = user ? applyFilters(tickets.filter((t) => t.assignees?.some(a => a.userId === user.id))) : [];
+  const teamQueue      = user ? applyFilters(tickets.filter((t) => !t.assignees?.length)) : [];
+  const hasFilters     = !!(filters.status || filters.category || filters.priority);
+  const clearFilters   = () => setFilters({ status: '', category: '', priority: '' });
+
+  if (!user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <LoadingSpinner size="lg" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <Navbar />
+
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
+          <div>
+            <div className="flex items-center gap-3 mb-1">
+              <h1 className="text-2xl font-bold text-gray-900">Team Dashboard</h1>
+              {user.team && <TeamBadge team={user.team} />}
+            </div>
+            <p className="text-gray-500 text-sm">
+              Welcome back, <span className="font-medium text-gray-700">{user.name}</span>.
+              {user.team ? ` Showing tickets for the ${user.team} team.` : ' Showing all assigned tickets.'}
+            </p>
+          </div>
+          <button onClick={fetchTickets} disabled={loading}
+            className="btn-secondary self-start sm:self-auto" aria-label="Refresh tickets">
+            {loading ? <LoadingSpinner size="sm" /> : (
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+              </svg>
+            )}
+            Refresh
+          </button>
+        </div>
+
+        {error && (
+          <div className="alert-error mb-6 flex items-center gap-2">
+            <svg className="w-4 h-4 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd"/>
+            </svg>
+            {error}
+            <button onClick={fetchTickets} className="ml-auto text-xs underline">Retry</button>
+          </div>
+        )}
+
+        {loading && tickets.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-24 gap-3">
+            <LoadingSpinner size="lg" />
+            <p className="text-gray-500 text-sm">Loading tickets…</p>
+          </div>
+        ) : (
+          <>
+            {/* Stats — based on all tickets this user can see */}
+            <div className="mb-8">
+              <StatsCards tickets={tickets} />
+            </div>
+
+            {/* Shared filter bar */}
+            <div className="flex justify-end mb-4">
+              <FilterBar filters={filters} onChange={handleFilterChange} isAdmin={false} />
+            </div>
+
+            {/* ── Section 1: Assigned to Me ──────────────────────────────── */}
+            <div className="mb-8">
+              <div className="flex items-center gap-3 mb-3">
+                <h2 className="text-base font-semibold text-gray-900">
+                  Assigned to Me
+                </h2>
+                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium
+                  ${assignedToMe.length > 0 ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500'}`}>
+                  {assignedToMe.length}
+                </span>
+                {assignedToMe.length > 0 && (
+                  <span className="text-xs text-blue-600 font-medium flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-full bg-blue-500 inline-block" />
+                    Action required
+                  </span>
+                )}
+              </div>
+
+              <div className="card">
+                <TicketTable
+                  tickets={assignedToMe}
+                  isAdmin={false}
+                  userRole={user.role}
+                  userTeam={user.team}
+                  hasActiveFilters={hasFilters}
+                  onClearFilters={clearFilters}
+                  onTicketDeleted={handleTicketDeleted}
+                />
+              </div>
+            </div>
+
+            {/* ── Section 2: Team Queue (unassigned) ────────────────────── */}
+            <div>
+              <div className="flex items-center gap-3 mb-3">
+                <h2 className="text-base font-semibold text-gray-900">
+                  {user.team ? `${user.team} Team Queue` : 'Team Queue'}
+                </h2>
+                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium
+                  ${teamQueue.length > 0 ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-500'}`}>
+                  {teamQueue.length}
+                </span>
+                <span className="text-xs text-gray-400">Unassigned — available to any team member</span>
+              </div>
+
+              <div className="card">
+                <TicketTable
+                  tickets={teamQueue}
+                  isAdmin={false}
+                  userRole={user.role}
+                  userTeam={user.team}
+                  hasActiveFilters={hasFilters}
+                  onClearFilters={clearFilters}
+                  onTicketDeleted={handleTicketDeleted}
+                />
+              </div>
+            </div>
+          </>
+        )}
+      </main>
+    </div>
+  );
+}
+</file>
+
 <file path="package.json">
 {
   "name": "helpdesk",
@@ -6568,631 +6198,374 @@ export default function Navbar() {
 }
 </file>
 
-<file path="app/components/TicketTable.jsx">
-'use client';
-
+<file path="lib/classifier.js">
 /**
- * TicketTable component
- * - Rows link to /tickets/[id]
- * - Status dropdown: TeamMember (own team) + Admin
- * - Multi-team reassign popover: Admin only
- * - Delete button with confirmation dialog
+ * AI Classification Pipeline
+ *
+ *   Step 1 — Custom rule-based algorithm → category, team, priority + confidence score
+ *   Step 2 — Cache/DB check → if near-identical issue seen recently, reuse (skip AI call)
+ *   Step 3 — High confidence: keep custom classification, call Vertex AI for draft only
+ *             Low confidence:  call Vertex AI for full classification + draft
+ *   Step 4 — Fallback to custom result + template draft if Vertex AI unavailable
+ *
+ * Uses @google/genai with Vertex AI backend (service account via GOOGLE_SERVICE_ACCOUNT_JSON)
  */
 
-import { useState } from 'react';
-import Link from 'next/link';
-import { StatusBadge, PriorityBadge, CategoryBadge, TeamsDisplay } from './StatusBadge';
-import LoadingSpinner from './LoadingSpinner';
+import { buildGoogleAIClient } from './googleai';
 
-const STATUS_OPTIONS        = ['Open', 'In Progress', 'Resolved'];
-const STATUS_OPTIONS_ADMIN  = ['Open', 'In Progress', 'Resolved', 'Signed Off'];
-const CATEGORY_OPTIONS = ['Bug', 'Feature Request', 'Billing', 'HR', 'Other'];
-const TEAM_OPTIONS     = ['Development', 'Billing', 'HR', 'Support'];
+// ─── Constants ────────────────────────────────────────────────────────────────
 
-// ── Inline user assignment picker — Admin only ────────────────────────────────
-function UserPicker({ currentAssignees = [], ticketId, allUsers, onSaved }) {
-  const [open,       setOpen]       = useState(false);
-  const [saving,     setSaving]     = useState(false);
-  const [savingFor,  setSavingFor]  = useState(null);
-  const [error,      setError]      = useState('');
+const CATEGORIES = ['Billing', 'Bug', 'Feature Request', 'HR', 'Other'];
+const TEAMS      = ['Development', 'Billing', 'HR', 'Support'];
+const PRIORITIES = ['Low', 'Medium', 'High'];
 
-  const currentIds = (currentAssignees || []).map(a => a.userId);
+const HIGH_CONFIDENCE_THRESHOLD = 0.70;
 
-  const assign = async (userId) => {
-    setSaving(true);
-    setSavingFor(userId);
-    setError('');
-    try {
-      // Toggle: add if not present, remove if present
-      const currentIds = (currentAssignees || []).map(a => a.userId);
-      const newIds = currentIds.includes(userId)
-        ? currentIds.filter(id => id !== userId)
-        : [...currentIds, userId];
-      const res  = await fetch(`/api/tickets/${ticketId}`, {
-        method:  'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ assignedUserIds: newIds }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed');
-      onSaved(data.ticket.assignees || []);
-      // Don't close — allow multi-select
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setSaving(false);
-      setSavingFor(null);
-    }
-  };
+// ─── Step 1: Custom Rule-Based Classifier ────────────────────────────────────
 
-  const unassignAll = async () => {
-    setSaving(true);
-    setSavingFor('__all__');
-    setError('');
-    try {
-      const res  = await fetch(`/api/tickets/${ticketId}`, {
-        method:  'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ assignedUserIds: [] }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed');
-      onSaved([]);
-      setOpen(false);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setSaving(false);
-      setSavingFor(null);
-    }
-  };
+const RULES = [
+  {
+    phrases: [
+      'charged twice', 'double charge', 'duplicate charge', 'overcharged',
+      'wrong amount', 'incorrect charge', 'payment failed', 'payment declined',
+      'payment issue', 'refund request', 'refund my', 'billing error',
+      'credit card', 'debit card', 'money back', 'subscription charge',
+      'subscription cancelled', 'invoice payment', 'invoice issue', 'invoice problem',
+      'invoice related', 'billing issue', 'billing problem', 'billing query',
+      'pay for', 'charged for', 'invoice',
+    ],
+    category: 'Billing', team: 'Billing', priority: 'High', weight: 3.0,
+  },
+  {
+    phrases: [
+      'not working', 'not loading', 'not showing', 'not displaying', 'not visible',
+      'not found', 'cannot login', "can't login", 'login failed', 'login error',
+      'page crash', 'app crash', 'crashes when', 'blank screen', 'white screen',
+      'error 500', 'error 404', '500 error', '404 error', 'internal server error',
+      'throws error', 'getting error', 'shows error', 'exception',
+      'broken', 'not responding', 'keeps freezing', 'freezes', 'application freezes',
+      'page freezes', 'becomes blank', 'goes blank', 'not opening',
+      'fails to load', 'failed to', 'stuck on', 'missing data', 'data not',
+      'records not', 'button not',
+    ],
+    category: 'Bug', team: 'Development', priority: 'High', weight: 3.0,
+  },
+  {
+    phrases: [
+      'feature request', 'please add', 'can you add', 'would like to have',
+      'would be great', 'suggest adding', 'nice to have',
+      'dark mode', 'add support for', 'add the ability', 'new feature',
+      'could you implement', 'enhancement', 'improvement request',
+    ],
+    category: 'Feature Request', team: 'Development', priority: 'Low', weight: 2.5,
+  },
+  {
+    phrases: [
+      'leave request', 'annual leave', 'sick leave', 'maternity leave',
+      'paternity leave', 'leave balance', 'leave approval', 'leave pending',
+      'payroll issue', 'salary problem', 'salary discrepancy', 'wrong salary',
+      'hr policy', 'hr team', 'onboarding', 'offboarding',
+      'performance review', 'promotion request', 'contract issue', 'benefits',
+    ],
+    category: 'HR', team: 'HR', priority: 'Medium', weight: 3.0,
+  },
+  {
+    phrases: [
+      'how do i', 'how to', 'i need help', 'need assistance',
+      'forgot password', 'password reset', 'reset my password', 'lost access',
+      'account locked', 'cannot access', 'set up', 'configure',
+      'getting started', 'user guide', 'documentation', 'tutorial',
+    ],
+    category: 'Other', team: 'Support', priority: 'Low', weight: 1.5,
+  },
+];
 
-  const label = saving && savingFor !== '__all__'
-    ? (
-      <span className="flex items-center gap-1.5 text-blue-600">
-        <svg className="animate-spin w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24">
-          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/>
-        </svg>
-        Saving…
-      </span>
-    )
-    : currentIds.length > 0
-    ? (
-      <span className="flex items-center gap-1 flex-wrap max-w-[120px]">
-        {currentIds.slice(0, 2).map(uid => {
-          const u = allUsers.find(x => x.id === uid);
-          return u ? (
-            <span key={uid} className="w-4 h-4 rounded-full bg-blue-100 text-blue-700 inline-flex items-center justify-center text-xs font-bold flex-shrink-0"
-              title={u.name}>
-              {u.name.charAt(0).toUpperCase()}
-            </span>
-          ) : null;
-        })}
-        {currentIds.length > 2 && <span className="text-xs text-gray-500">+{currentIds.length - 2}</span>}
-      </span>
-    )
-    : <span className="text-gray-400">Unassigned</span>;
+const PRIORITY_OVERRIDES = {
+  High: ['urgent', 'critical', 'asap', 'immediately', 'emergency', 'blocking',
+         'cannot work', 'production down', 'data loss', 'security issue', 'severe'],
+  Low:  ['minor', 'not urgent', 'nice to have', 'eventually', 'low priority'],
+};
 
-  return (
-    <div className="relative">
-      <button
-        onClick={(e) => { e.stopPropagation(); if (!saving) setOpen(!open); }}
-        disabled={saving}
-        className="text-xs border border-gray-200 rounded-md px-2 py-1 bg-white hover:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400 whitespace-nowrap flex items-center gap-1 disabled:opacity-60 disabled:cursor-not-allowed"
-      >
-        {label} {!saving && '▾'}
-      </button>
-
-      {open && !saving && (
-        <div
-          className="absolute z-30 left-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-lg p-2 min-w-[200px] max-h-64 overflow-y-auto"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <p className="text-xs font-semibold text-gray-500 px-2 py-1 uppercase tracking-wide">Assign to</p>
-          {/* Unassign option */}
-          <button
-            onClick={() => assign(null)}
-            disabled={saving}
-            className={`w-full text-left px-2 py-1.5 text-xs rounded-lg hover:bg-gray-50 flex items-center gap-2 ${!currentAssignee ? 'text-gray-400' : 'text-gray-700'}`}
-          >
-            {savingFor === null && saving
-              ? <svg className="animate-spin w-3 h-3 text-blue-500" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/></svg>
-              : <span className="w-4 h-4 rounded-full bg-gray-100 inline-flex items-center justify-center text-gray-400 flex-shrink-0">—</span>
-            }
-            Unassigned
-          </button>
-          {/* Group by team */}
-          {Object.entries(
-            allUsers.reduce((acc, u) => {
-              const t = u.team || 'Other';
-              if (!acc[t]) acc[t] = [];
-              acc[t].push(u);
-              return acc;
-            }, {})
-          ).map(([team, members]) => (
-            <div key={team}>
-              <p className="text-xs text-gray-400 px-2 py-1 mt-1 font-medium">{team}</p>
-              {members.map(u => (
-                <button
-                  key={u.id}
-                  onClick={() => assign(u.id)}
-                  disabled={saving}
-                  className={`w-full text-left px-2 py-1.5 text-xs rounded-lg hover:bg-blue-50 flex items-center gap-2
-                    ${currentAssignee?.id === u.id ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-gray-700'}`}
-                >
-                  {savingFor === u.id
-                    ? <svg className="animate-spin w-3 h-3 text-blue-500 flex-shrink-0" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/></svg>
-                    : <span className="w-4 h-4 rounded-full bg-blue-100 text-blue-700 inline-flex items-center justify-center text-xs font-bold flex-shrink-0">
-                        {u.name.charAt(0).toUpperCase()}
-                      </span>
-                  }
-                  {u.name}
-                </button>
-              ))}
-            </div>
-          ))}
-          {error && <p className="text-xs text-red-500 mt-1 px-2">{error}</p>}
-        </div>
-      )}
-    </div>
-  );
+function normalise(text) {
+  return text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ');
 }
 
-// ── Inline multi-team picker used in the Reassign column ──────────────────────
-function TeamPicker({ currentTeams, ticketId, onSaved }) {
-  const [selected,  setSelected]  = useState(currentTeams || []);
-  const [saving,    setSaving]    = useState(false);
-  const [open,      setOpen]      = useState(false);
-  const [error,     setError]     = useState('');
-
-  const toggle = (team) =>
-    setSelected((prev) =>
-      prev.includes(team) ? prev.filter((t) => t !== team) : [...prev, team]
-    );
-
-  const save = async () => {
-    if (selected.length === 0) { setError('Select at least one team.'); return; }
-    setSaving(true);
-    setError('');
-    try {
-      const res  = await fetch(`/api/tickets/${ticketId}`, {
-        method:  'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ assignedTeams: selected }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed');
-      onSaved(data.ticket.assignedTeams);
-      setOpen(false);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div className="relative">
-      <button
-        onClick={(e) => { e.stopPropagation(); setOpen(!open); setSelected(currentTeams || []); }}
-        className="text-xs border border-gray-200 rounded-md px-2 py-1 bg-white hover:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400 whitespace-nowrap"
-      >
-        {currentTeams?.length ? currentTeams.join(', ') : 'Unassigned'} ▾
-      </button>
-
-      {open && (
-        <div
-          className="absolute z-30 left-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-lg p-3 min-w-[180px]"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <p className="text-xs font-semibold text-gray-600 mb-2">Assign teams</p>
-          {TEAM_OPTIONS.map((t) => (
-            <label key={t} className="flex items-center gap-2 py-1 cursor-pointer hover:text-blue-700">
-              <input
-                type="checkbox"
-                checked={selected.includes(t)}
-                onChange={() => toggle(t)}
-                className="accent-blue-600"
-              />
-              <span className="text-xs">{t}</span>
-            </label>
-          ))}
-          {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
-          <div className="flex gap-2 mt-3">
-            <button
-              onClick={save}
-              disabled={saving}
-              className="btn-primary text-xs px-2 py-1"
-            >
-              {saving ? <LoadingSpinner size="sm" /> : 'Save'}
-            </button>
-            <button
-              onClick={() => setOpen(false)}
-              className="btn-secondary text-xs px-2 py-1"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
+function countPhraseMatches(text, phrases) {
+  const n = normalise(text);
+  return phrases.filter(p => n.includes(p)).length;
 }
 
-// ── Main TicketTable ───────────────────────────────────────────────────────────
-export default function TicketTable({
-  tickets,
-  isAdmin          = false,
-  userTeam         = null,
-  userRole         = null,
-  allUsers         = [],   // active users for the assignment picker (admin only)
-  onTicketDeleted,
-  onClearFilters,
-  hasActiveFilters = false,
-}) {
-  const [overrides,     setOverrides]     = useState({});
-  const [updatingId,    setUpdatingId]    = useState(null);
-  const [updatingField, setUpdatingField] = useState(null);
-  const [error,         setError]         = useState('');
-  const [confirmDelete, setConfirmDelete] = useState(null);
-  const [deleting,      setDeleting]      = useState(false);
+function customClassify(subject, description) {
+  const text   = `${subject} ${description}`;
+  const scores = {};
 
-  const merge = (ticket) => ({ ...ticket, ...(overrides[ticket.id] || {}) });
+  console.log('\n┌─────────────────────────────────────────────────────────');
+  console.log(`│ [classifier] Rule-based scan`);
+  console.log(`│ Subject     : "${subject}"`);
+  console.log(`│ Description : "${description.substring(0, 80)}${description.length > 80 ? '…' : ''}"`);
+  console.log('├─────────────────────────────────────────────────────────');
 
-  const handleAssigneeSaved = (ticketId, newAssignee) => {
-    setOverrides((prev) => ({ ...prev, [ticketId]: { ...prev[ticketId], assignedTo: newAssignee, assignedToId: newAssignee?.id ?? null } }));
-  };
-
-  const canDelete = (ticket) => userRole === 'Admin';
-
-  const handleStatusChange = async (ticketId, newStatus, e) => {
-    e.stopPropagation();
-    setUpdatingId(ticketId);
-    setUpdatingField('status');
-    setError('');
-    try {
-      const res  = await fetch(`/api/tickets/${ticketId}`, {
-        method:  'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ status: newStatus }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to update');
-      setOverrides((prev) => ({ ...prev, [ticketId]: { ...prev[ticketId], status: newStatus } }));
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setUpdatingId(null);
-      setUpdatingField(null);
+  for (const rule of RULES) {
+    const matched = rule.phrases.filter(p => normalise(text).includes(p));
+    if (matched.length > 0) {
+      const contribution = matched.length * rule.weight;
+      scores[rule.category] = (scores[rule.category] || 0) + contribution;
+      console.log(`│  ✓ [${rule.category.padEnd(16)}] matched ${matched.length} phrase(s) × weight ${rule.weight} = +${contribution.toFixed(1)}`);
+      console.log(`│    phrases: ${matched.map(p => `"${p}"`).join(', ')}`);
+    } else {
+      console.log(`│  ✗ [${rule.category.padEnd(16)}] no matches`);
     }
-  };
-
-  const handleCategoryChange = async (ticketId, newCategory, e) => {
-    e.stopPropagation();
-    setUpdatingId(ticketId);
-    setUpdatingField('category');
-    setError('');
-    try {
-      const res  = await fetch(`/api/tickets/${ticketId}`, {
-        method:  'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ category: newCategory }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to update');
-      setOverrides((prev) => ({ ...prev, [ticketId]: { ...prev[ticketId], category: newCategory } }));
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setUpdatingId(null);
-      setUpdatingField(null);
-    }
-  };
-
-  const handleTeamsSaved = (ticketId, newTeams) => {
-    setOverrides((prev) => ({ ...prev, [ticketId]: { ...prev[ticketId], assignedTeams: newTeams } }));
-  };
-
-  const handleDeleteConfirmed = async () => {
-    if (!confirmDelete) return;
-    setDeleting(true);
-    setError('');
-    try {
-      const res  = await fetch(`/api/tickets/${confirmDelete.id}`, { method: 'DELETE' });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Delete failed');
-      if (onTicketDeleted) onTicketDeleted(confirmDelete.id);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setDeleting(false);
-      setConfirmDelete(null);
-    }
-  };
-
-  const formatDate = (dateStr) =>
-    new Date(dateStr).toLocaleDateString('en-US', {
-      month: 'short', day: 'numeric', year: 'numeric',
-    });
-
-  if (!tickets || tickets.length === 0) {
-    return (
-      <div className="text-center py-16 text-gray-500">
-        <svg className="w-12 h-12 mx-auto mb-3 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-            d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-        </svg>
-        {hasActiveFilters ? (
-          <>
-            <p className="font-medium text-gray-700">No tickets match your filters</p>
-            <p className="text-sm mt-1 mb-4 text-gray-500">Try adjusting or clearing your filters.</p>
-            {onClearFilters && (
-              <button onClick={onClearFilters} className="btn-primary text-sm">Clear all filters</button>
-            )}
-          </>
-        ) : (
-          <>
-            <p className="font-medium">No tickets found</p>
-            <p className="text-sm mt-1">Tickets will appear here when submitted.</p>
-          </>
-        )}
-      </div>
-    );
   }
 
-  return (
-    <>
-      {error && (
-        <div className="alert-error mb-4 flex items-center gap-2 text-sm">
-          <svg className="w-4 h-4 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-          </svg>
-          {error}
-        </div>
-      )}
+  if (Object.keys(scores).length === 0) {
+    console.log('│  → No rule matched → fallback: Other / Support / Medium / conf=0');
+    console.log('└─────────────────────────────────────────────────────────\n');
+    return { category: 'Other', team: 'Support', priority: 'Medium', confidence: 0 };
+  }
 
-      {/* ── Desktop Table ──────────────────────────────────────────────────── */}
-      <div className="hidden md:block overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-gray-200 text-left">
-              <th className="pb-3 pr-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">#</th>
-              <th className="pb-3 pr-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Subject</th>
-              <th className="pb-3 pr-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Category</th>
-              <th className="pb-3 pr-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Teams</th>
-              <th className="pb-3 pr-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Priority</th>
-              <th className="pb-3 pr-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
-              {isAdmin && (
-                <th className="pb-3 pr-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Reassign</th>
-              )}
-              {isAdmin && (
-                <th className="pb-3 pr-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Assigned To</th>
-              )}
-              <th className="pb-3 pr-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Date</th>
-              <th className="pb-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {tickets.map((rawTicket) => {
-              const ticket  = merge(rawTicket);
-              const teams   = ticket.assignedTeams ?? (ticket.assignedTeam ? [ticket.assignedTeam] : []);
-              const showDel = canDelete(ticket);
+  const sorted     = Object.entries(scores).sort((a, b) => b[1] - a[1]);
+  const [topCat, topScore] = sorted[0];
+  const totalScore = sorted.reduce((s, [, v]) => s + v, 0);
+  const confidence = totalScore > 0 ? topScore / totalScore : 0;
 
-              return (
-                <tr key={ticket.id} className="hover:bg-gray-50 transition-colors group">
-                  {/* Ticket number */}
-                  <td className="py-3 pr-4 text-xs font-mono font-semibold text-gray-500 whitespace-nowrap">
-                    #{String(ticket.ticketNumber ?? '').padStart(3, '0')}
-                  </td>
-                  {/* Subject */}
-                  <td className="py-3 pr-4">
-                    <Link href={`/tickets/${ticket.id}`} className="block group-hover:text-blue-600">
-                      <div className="font-medium text-gray-900 truncate max-w-[200px] group-hover:text-blue-600" title={ticket.subject}>
-                        {ticket.subject}
-                      </div>
-                      <div className="text-xs text-gray-400 truncate max-w-[200px] mt-0.5">
-                        {ticket.description.substring(0, 55)}…
-                      </div>
-                    </Link>
-                  </td>
+  console.log('├─────────────────────────────────────────────────────────');
+  console.log('│  Score board:');
+  sorted.forEach(([cat, score]) => {
+    const pct   = ((score / totalScore) * 100).toFixed(1);
+    const bar   = '█'.repeat(Math.round(score / totalScore * 20));
+    const arrow = cat === topCat ? ' ◄ winner' : '';
+    console.log(`│    ${cat.padEnd(18)} ${score.toFixed(1).padStart(5)} pts  ${pct.padStart(5)}%  ${bar}${arrow}`);
+  });
 
-                  {/* Category — dropdown for admin, badge for team members */}
-                  <td className="py-3 pr-4">
-                    {isAdmin ? (
-                      updatingId === ticket.id && updatingField === 'category' ? <LoadingSpinner size="sm" /> : (
-                        <select
-                          value={ticket.category}
-                          onChange={(e) => handleCategoryChange(ticket.id, e.target.value, e)}
-                          className="text-xs border border-gray-200 rounded-md px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400 cursor-pointer"
-                          aria-label={`Category for ${ticket.subject}`}
-                          disabled={updatingId === ticket.id}
-                        >
-                          {CATEGORY_OPTIONS.map((c) => <option key={c} value={c}>{c}</option>)}
-                        </select>
-                      )
-                    ) : (
-                      <CategoryBadge category={ticket.category} />
-                    )}
-                  </td>
-                  <td className="py-3 pr-4"><TeamsDisplay assignedTeams={teams} /></td>
-                  <td className="py-3 pr-4"><PriorityBadge priority={ticket.priority} /></td>
+  const rule   = RULES.find(r => r.category === topCat);
+  let priority = rule?.priority ?? 'Medium';
 
-                  {/* Status dropdown */}
-                  <td className="py-3 pr-4">
-                    {updatingId === ticket.id && updatingField === 'status' ? <LoadingSpinner size="sm" /> : (
-                      <select
-                        value={ticket.status}
-                        onChange={(e) => handleStatusChange(ticket.id, e.target.value, e)}
-                        className="text-xs border border-gray-200 rounded-md px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400 cursor-pointer"
-                        aria-label={`Status for ${ticket.subject}`}
-                        disabled={updatingId === ticket.id || ticket.status === 'Signed Off' && !isAdmin}
-                      >
-                        {(isAdmin ? STATUS_OPTIONS_ADMIN : STATUS_OPTIONS).map((s) => <option key={s} value={s}>{s}</option>)}
-                      </select>
-                    )}
-                  </td>
+  const highOverrides = PRIORITY_OVERRIDES.High.filter(p => normalise(text).includes(p));
+  const lowOverrides  = PRIORITY_OVERRIDES.Low.filter(p  => normalise(text).includes(p));
 
-                  {/* Multi-team reassign — Admin only */}
-                  {isAdmin && (
-                    <td className="py-3 pr-4">
-                      <TeamPicker
-                        currentTeams={teams}
-                        ticketId={ticket.id}
-                        onSaved={(newTeams) => handleTeamsSaved(ticket.id, newTeams)}
-                      />
-                    </td>
-                  )}
+  if (highOverrides.length > 0) {
+    priority = 'High';
+    console.log(`│  ⚡ Priority override → High  (matched: ${highOverrides.map(p => `"${p}"`).join(', ')})`);
+  } else if (lowOverrides.length > 0) {
+    priority = 'Low';
+    console.log(`│  ⬇ Priority override → Low   (matched: ${lowOverrides.map(p => `"${p}"`).join(', ')})`);
+  } else {
+    console.log(`│  Priority from rule: ${priority}`);
+  }
 
-                  {/* Individual assignment — Admin only */}
-                  {isAdmin && (
-                    <td className="py-3 pr-4">
-                      <UserPicker
-                        currentAssignee={ticket.assignedTo ?? null}
-                        ticketId={ticket.id}
-                        allUsers={allUsers}
-                        onSaved={(newAssignee) => handleAssigneeSaved(ticket.id, newAssignee)}
-                      />
-                    </td>
-                  )}
+  console.log('├─────────────────────────────────────────────────────────');
+  console.log(`│  Result  : category=${topCat}  team=${rule?.team ?? 'Support'}  priority=${priority}`);
+  console.log(`│  Confidence: ${(confidence * 100).toFixed(1)}%  (${topScore.toFixed(1)} / ${totalScore.toFixed(1)})`);
+  console.log('└─────────────────────────────────────────────────────────\n');
 
-                  <td className="py-3 pr-4 text-gray-500 text-xs whitespace-nowrap">
-                    {formatDate(ticket.createdAt)}
-                  </td>
+  return { category: topCat, team: rule?.team ?? 'Support', priority, confidence };
+}
 
-                  {/* Actions */}
-                  <td className="py-3">
-                    <div className="flex items-center gap-1">
-                      <Link
-                        href={`/tickets/${ticket.id}`}
-                        className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
-                        title="View details"
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                        </svg>
-                      </Link>
-                      {showDel && (
-                        <button
-                          onClick={() => setConfirmDelete(ticket)}
-                          className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
-                          title="Delete ticket"
-                        >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                              d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                          </svg>
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+// ─── Step 2: Cache / Near-Duplicate Check ────────────────────────────────────
 
-      {/* ── Mobile Cards ──────────────────────────────────────────────────────── */}
-      <div className="md:hidden space-y-4">
-        {tickets.map((rawTicket) => {
-          const ticket  = merge(rawTicket);
-          const teams   = ticket.assignedTeams ?? (ticket.assignedTeam ? [ticket.assignedTeam] : []);
-          const showDel = canDelete(ticket);
-          return (
-            <div key={ticket.id} className="border border-gray-200 rounded-lg p-4 bg-white">
-              <div className="flex items-start justify-between gap-2 mb-2">
-                <Link href={`/tickets/${ticket.id}`}
-                  className="font-medium text-gray-900 text-sm hover:text-blue-600">{ticket.subject}</Link>
-                <div className="flex items-center gap-2 flex-shrink-0">
-                  <span className="text-xs font-mono font-semibold text-gray-400">#{String(ticket.ticketNumber ?? '').padStart(3, '0')}</span>
-                  <StatusBadge status={ticket.status} />
-                </div>
-              </div>
-              <p className="text-xs text-gray-500 mb-3 line-clamp-2">{ticket.description}</p>
-              <div className="flex flex-wrap gap-1.5 mb-3">
-                <TeamsDisplay assignedTeams={teams} />
-                <PriorityBadge priority={ticket.priority} />
-                <CategoryBadge category={ticket.category} />
-              </div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <select
-                  value={ticket.category}
-                  onChange={(e) => handleCategoryChange(ticket.id, e.target.value, e)}
-                  className="text-xs border border-gray-200 rounded-md px-2 py-1 bg-white"
-                  disabled={updatingId === ticket.id || !isAdmin}
-                  style={!isAdmin ? { pointerEvents: 'none' } : {}}
-                >
-                  {CATEGORY_OPTIONS.map((c) => <option key={c} value={c}>{c}</option>)}
-                </select>
-                <select
-                  value={ticket.status}
-                  onChange={(e) => handleStatusChange(ticket.id, e.target.value, e)}
-                  className="text-xs border border-gray-200 rounded-md px-2 py-1 bg-white flex-1"
-                  disabled={updatingId === ticket.id || (ticket.status === 'Signed Off' && !isAdmin)}
-                >
-                  {(isAdmin ? STATUS_OPTIONS_ADMIN : STATUS_OPTIONS).map((s) => <option key={s} value={s}>{s}</option>)}
-                </select>
-                {isAdmin && (
-                  <TeamPicker
-                    currentTeams={teams}
-                    ticketId={ticket.id}
-                    onSaved={(newTeams) => handleTeamsSaved(ticket.id, newTeams)}
-                  />
-                )}
-                <Link href={`/tickets/${ticket.id}`}
-                  className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 border border-gray-200">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                  </svg>
-                </Link>
-                {showDel && (
-                  <button onClick={() => setConfirmDelete(ticket)}
-                    className="p-1.5 rounded-lg text-red-400 hover:text-red-600 border border-red-200">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                    </svg>
-                  </button>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
+function tokenise(text) {
+  return text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean);
+}
 
-      {/* ── Delete Confirmation Modal ──────────────────────────────────────────── */}
-      {confirmDelete && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
-          role="dialog" aria-modal="true">
-          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center flex-shrink-0">
-                <svg className="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.834-1.964-.834-2.732 0L3.07 16.5c-.77.833.192 2.5 1.732 2.5z" />
-                </svg>
-              </div>
-              <div>
-                <h3 className="font-semibold text-gray-900">Delete Ticket?</h3>
-                <p className="text-sm text-gray-500">This cannot be undone.</p>
-              </div>
-            </div>
-            <div className="bg-gray-50 rounded-lg p-3 mb-5 text-sm text-gray-700">
-              <span className="font-medium">"{confirmDelete.subject}"</span>
-            </div>
-            <div className="flex gap-3">
-              <button onClick={() => setConfirmDelete(null)} disabled={deleting} className="btn-secondary flex-1">Cancel</button>
-              <button onClick={handleDeleteConfirmed} disabled={deleting} className="btn-danger flex-1">
-                {deleting ? <><LoadingSpinner size="sm" /> Deleting…</> : 'Yes, Delete'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </>
+function similarity(a, b) {
+  const setA = new Set(tokenise(a));
+  const setB = new Set(tokenise(b));
+  const inter = new Set([...setA].filter(x => setB.has(x)));
+  const union = new Set([...setA, ...setB]);
+  return union.size === 0 ? 0 : inter.size / union.size;
+}
+
+export function findNearDuplicate(subject, description, existingTickets) {
+  const newText = `${subject} ${description}`;
+  for (const ticket of existingTickets) {
+    if (similarity(newText, `${ticket.subject} ${ticket.description}`) >= 0.70) {
+      console.log(`[classifier] Cache hit — reusing ticket ${ticket.id}`);
+      return ticket;
+    }
+  }
+  return null;
+}
+
+// ─── Step 3: Vertex AI via @google/genai ─────────────────────────────────────
+
+function buildClient() {
+  const { ai, error } = buildGoogleAIClient();
+  if (!ai) {
+    console.warn(`[classifier] Vertex AI client not configured: ${error}`);
+  }
+  return ai;
+}
+
+async function callVertexAI(subject, description, hintCategory = null, hintTeam = null) {
+  const ai = buildClient();
+  if (!ai) {
+    console.warn('[classifier] ⚠ Vertex AI client not configured');
+    return null;
+  }
+
+  const mode = hintCategory ? 'DRAFT ONLY (high-confidence hint)' : 'FULL CLASSIFICATION';
+  console.log(`\n┌─ [classifier] Vertex AI call ─────────────────────────────`);
+  console.log(`│  Mode    : ${mode}`);
+  if (hintCategory) {
+    console.log(`│  Hint    : category="${hintCategory}"  team="${hintTeam}"`);
+  }
+  console.log(`│  Subject : "${subject}"`);
+
+  try {
+    const hint = hintCategory
+      ? `\nOur rule-based classifier is HIGHLY confident this is "${hintCategory}" → "${hintTeam}". Agree unless clearly wrong.`
+      : '';
+
+    const prompt = `You are a support ticket classifier for a B2B software company.
+
+Team responsibilities:
+- Development: bugs, UI errors, crashes, pages not loading/showing, feature requests, anything technical
+- Billing: ONLY actual payment problems (wrong charges, refunds, payment failures, billing disputes)
+- HR: leave requests, payroll/salary issues, HR policies, employee contracts, benefits
+- Support: general how-to, password reset, account access, documentation
+
+Critical rules:
+1. "Invoice not showing in dashboard" = Development (UI/display bug, NOT a Billing issue)
+2. "Charged twice / wrong charge / refund" = Billing (actual money problem)
+3. Any crash, error, blank screen, missing data = Development${hint}
+
+Return valid JSON matching this exact schema:
+{
+  "category": one of [${CATEGORIES.map(c => `"${c}"`).join(', ')}],
+  "priority": one of [${PRIORITIES.map(p => `"${p}"`).join(', ')}],
+  "assignedTeam": one of [${TEAMS.map(t => `"${t}"`).join(', ')}],
+  "draftResponse": "professional 2-3 sentence empathetic response to the client"
+}
+
+Subject: ${subject}
+Description: ${description}`;
+
+    const response = await ai.models.generateContent({
+      model:    'gemini-3.5-flash',
+      contents: prompt,
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: 'object',
+          properties: {
+            category:      { type: 'string', enum: CATEGORIES },
+            priority:      { type: 'string', enum: PRIORITIES },
+            assignedTeam:  { type: 'string', enum: TEAMS },
+            draftResponse: { type: 'string' },
+          },
+          required: ['category', 'priority', 'assignedTeam', 'draftResponse'],
+        },
+        temperature: 0.1,
+      },
+    });
+
+    const text   = response.text;
+    const parsed = JSON.parse(text);
+
+    console.log(`│  Result  : category=${parsed.category}  team=${parsed.assignedTeam}  priority=${parsed.priority}`);
+    console.log(`│  Draft   : "${(parsed.draftResponse || '').substring(0, 60)}…"`);
+    console.log(`└────────────────────────────────────────────────────────────\n`);
+
+    return {
+      category:      CATEGORIES.includes(parsed.category)     ? parsed.category     : 'Other',
+      assignedTeam:  TEAMS.includes(parsed.assignedTeam)       ? parsed.assignedTeam : 'Support',
+      priority:      PRIORITIES.includes(parsed.priority)      ? parsed.priority     : 'Medium',
+      draftResponse: parsed.draftResponse || '',
+    };
+  } catch (err) {
+    console.error(`│  ✗ ERROR : ${err.message}`);
+    console.log(`└────────────────────────────────────────────────────────────\n`);
+    return null;
+  }
+}
+
+// ─── Fallback Draft ───────────────────────────────────────────────────────────
+
+function fallbackDraft(category, subject) {
+  const drafts = {
+    Billing:           `Thank you for reaching out about a billing concern. Our billing team will review your account and respond within 1–2 business days.`,
+    Bug:               `Thank you for reporting this issue with "${subject}". Our development team has been notified and will investigate promptly.`,
+    'Feature Request': `Thank you for your suggestion regarding "${subject}". We've logged it for our product team to evaluate.`,
+    HR:                `Thank you for contacting HR about "${subject}". Our HR team will respond within 1 business day.`,
+    Other:             `Thank you for contacting support. A team member will review "${subject}" and respond within 24–48 hours.`,
+  };
+  return drafts[category] || drafts.Other;
+}
+
+// ─── Main Entry Point ─────────────────────────────────────────────────────────
+
+export async function classifyTicket(subject, description, existingTickets = []) {
+
+  // Step 2: Cache check
+  const cached = findNearDuplicate(subject, description, existingTickets);
+  if (cached) {
+    console.log(`\n[classifier] 🗄 Cache hit — reusing classification from ticket #${cached.ticketNumber ?? cached.id}`);
+    console.log(`             category=${cached.category}  team=${cached.assignedTeams?.[0]}  priority=${cached.priority}\n`);
+    return {
+      category:        cached.category,
+      assignedTeam:    cached.assignedTeams?.[0] || cached.assignedTeam || 'Support',
+      assignedTeams:   cached.assignedTeams || [cached.assignedTeam || 'Support'],
+      priority:        cached.priority,
+      draftResponse:   cached.draftResponse || fallbackDraft(cached.category, subject),
+      source:          'cache',
+      confidenceScore: null,
+    };
+  }
+
+  // Step 1: Custom classifier
+  const custom = customClassify(subject, description);
+  const needsFullClassification = custom.confidence < HIGH_CONFIDENCE_THRESHOLD;
+
+  if (needsFullClassification) {
+    console.log(`[classifier] 🤖 Confidence ${(custom.confidence * 100).toFixed(1)}% < ${HIGH_CONFIDENCE_THRESHOLD * 100}% threshold → Vertex AI: FULL classification`);
+  } else {
+    console.log(`[classifier] ✅ Confidence ${(custom.confidence * 100).toFixed(1)}% ≥ ${HIGH_CONFIDENCE_THRESHOLD * 100}% threshold → Vertex AI: DRAFT only`);
+  }
+
+  // Step 3: Call Vertex AI
+  const aiResult = await callVertexAI(
+    subject, description,
+    needsFullClassification ? null : custom.category,
+    needsFullClassification ? null : custom.team,
   );
+
+  if (aiResult) {
+    if (needsFullClassification) {
+      console.log(`[classifier] 📋 Final (vertex-ai): category=${aiResult.category}  team=${aiResult.assignedTeam}  priority=${aiResult.priority}`);
+      return {
+        category:        aiResult.category,
+        assignedTeam:    aiResult.assignedTeam,
+        assignedTeams:   [aiResult.assignedTeam],
+        priority:        aiResult.priority,
+        draftResponse:   aiResult.draftResponse,
+        source:          'vertex-ai',
+        confidenceScore: custom.confidence, // rule-based score (low — that's why AI took over)
+      };
+    }
+    console.log(`[classifier] 📋 Final (custom+vertex-draft): category=${custom.category}  team=${custom.team}  priority=${custom.priority}`);
+    return {
+      category:        custom.category,
+      assignedTeam:    custom.team,
+      assignedTeams:   [custom.team],
+      priority:        custom.priority,
+      draftResponse:   aiResult.draftResponse,
+      source:          'custom+vertex-draft',
+      confidenceScore: custom.confidence,
+    };
+  }
+
+  // Step 4: Fallback
+  console.warn(`[classifier] ⚠ Vertex AI unavailable — using custom-fallback`);
+  console.log(`[classifier] 📋 Final (custom-fallback): category=${custom.category}  team=${custom.team}  priority=${custom.priority}`);
+  return {
+    category:        custom.category,
+    assignedTeam:    custom.team,
+    assignedTeams:   [custom.team],
+    priority:        custom.priority,
+    draftResponse:   fallbackDraft(custom.category, subject),
+    source:          'custom-fallback',
+    confidenceScore: custom.confidence,
+  };
 }
 </file>
 
@@ -8721,6 +8094,637 @@ export const ACTIONS = {
   DETAILS_PROVIDED:   'details_provided',
   FOLLOW_UP_ADDED:    'follow_up_added',
 };
+</file>
+
+<file path="app/components/TicketTable.jsx">
+'use client';
+
+/**
+ * TicketTable component
+ * - Rows link to /tickets/[id]
+ * - Status dropdown: TeamMember (own team) + Admin
+ * - Multi-team reassign popover: Admin only
+ * - Delete button with confirmation dialog
+ */
+
+import { useState } from 'react';
+import Link from 'next/link';
+import { StatusBadge, PriorityBadge, CategoryBadge, TeamsDisplay } from './StatusBadge';
+import LoadingSpinner from './LoadingSpinner';
+
+const STATUS_OPTIONS        = ['Open', 'In Progress', 'Resolved'];
+const STATUS_OPTIONS_ADMIN  = ['Open', 'In Progress', 'Resolved', 'Signed Off'];
+const CATEGORY_OPTIONS = ['Bug', 'Feature Request', 'Billing', 'HR', 'Other'];
+const TEAM_OPTIONS     = ['Development', 'Billing', 'HR', 'Support'];
+
+// ── Inline user assignment picker — Admin only ────────────────────────────────
+function UserPicker({ currentAssignees = [], ticketId, allUsers, onSaved }) {
+  const [open,       setOpen]       = useState(false);
+  const [saving,     setSaving]     = useState(false);
+  const [savingFor,  setSavingFor]  = useState(null);
+  const [error,      setError]      = useState('');
+
+  const currentIds = (currentAssignees || []).map(a => a.userId);
+
+  const assign = async (userId) => {
+    setSaving(true);
+    setSavingFor(userId);
+    setError('');
+    try {
+      // Toggle: add if not present, remove if present
+      const currentIds = (currentAssignees || []).map(a => a.userId);
+      const newIds = currentIds.includes(userId)
+        ? currentIds.filter(id => id !== userId)
+        : [...currentIds, userId];
+      const res  = await fetch(`/api/tickets/${ticketId}`, {
+        method:  'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ assignedUserIds: newIds }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed');
+      onSaved(data.ticket.assignees || []);
+      // Don't close — allow multi-select
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+      setSavingFor(null);
+    }
+  };
+
+  const unassignAll = async () => {
+    setSaving(true);
+    setSavingFor('__all__');
+    setError('');
+    try {
+      const res  = await fetch(`/api/tickets/${ticketId}`, {
+        method:  'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ assignedUserIds: [] }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed');
+      onSaved([]);
+      setOpen(false);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+      setSavingFor(null);
+    }
+  };
+
+  const label = saving && savingFor !== '__all__'
+    ? (
+      <span className="flex items-center gap-1.5 text-blue-600">
+        <svg className="animate-spin w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/>
+        </svg>
+        Saving…
+      </span>
+    )
+    : currentIds.length > 0
+    ? (
+      <span className="flex items-center gap-1 flex-wrap max-w-[120px]">
+        {currentIds.slice(0, 2).map(uid => {
+          const u = allUsers.find(x => x.id === uid);
+          return u ? (
+            <span key={uid} className="w-4 h-4 rounded-full bg-blue-100 text-blue-700 inline-flex items-center justify-center text-xs font-bold flex-shrink-0"
+              title={u.name}>
+              {u.name.charAt(0).toUpperCase()}
+            </span>
+          ) : null;
+        })}
+        {currentIds.length > 2 && <span className="text-xs text-gray-500">+{currentIds.length - 2}</span>}
+      </span>
+    )
+    : <span className="text-gray-400">Unassigned</span>;
+
+  return (
+    <div className="relative">
+      <button
+        onClick={(e) => { e.stopPropagation(); if (!saving) setOpen(!open); }}
+        disabled={saving}
+        className="text-xs border border-gray-200 rounded-md px-2 py-1 bg-white hover:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400 whitespace-nowrap flex items-center gap-1 disabled:opacity-60 disabled:cursor-not-allowed"
+      >
+        {label} {!saving && '▾'}
+      </button>
+
+      {open && !saving && (
+        <div
+          className="absolute z-30 left-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-lg p-2 min-w-[200px] max-h-64 overflow-y-auto"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <p className="text-xs font-semibold text-gray-500 px-2 py-1 uppercase tracking-wide">Assign to</p>
+          {/* Unassign all */}
+          <button
+            onClick={unassignAll}
+            disabled={saving}
+            className={`w-full text-left px-2 py-1.5 text-xs rounded-lg hover:bg-gray-50 flex items-center gap-2 ${currentIds.length === 0 ? 'text-gray-400' : 'text-gray-700'}`}
+          >
+            {savingFor === '__all__' && saving
+              ? <svg className="animate-spin w-3 h-3 text-blue-500" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/></svg>
+              : <span className="w-4 h-4 rounded-full bg-gray-100 inline-flex items-center justify-center text-gray-400 flex-shrink-0">—</span>
+            }
+            Unassign all
+          </button>
+          {/* Group by team — checkboxes for multi-select */}
+          {Object.entries(
+            allUsers.reduce((acc, u) => {
+              const t = u.team || 'Other';
+              if (!acc[t]) acc[t] = [];
+              acc[t].push(u);
+              return acc;
+            }, {})
+          ).map(([team, members]) => (
+            <div key={team}>
+              <p className="text-xs text-gray-400 px-2 py-1 mt-1 font-medium">{team}</p>
+              {members.map(u => {
+                const isChecked = currentIds.includes(u.id);
+                return (
+                  <button
+                    key={u.id}
+                    onClick={() => assign(u.id)}
+                    disabled={saving}
+                    className={`w-full text-left px-2 py-1.5 text-xs rounded-lg hover:bg-blue-50 flex items-center gap-2
+                      ${isChecked ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-gray-700'}`}
+                  >
+                    {savingFor === u.id && saving
+                      ? <svg className="animate-spin w-3 h-3 text-blue-500 flex-shrink-0" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/></svg>
+                      : <span className={`w-4 h-4 rounded-full inline-flex items-center justify-center text-xs font-bold flex-shrink-0 ${isChecked ? 'bg-blue-200 text-blue-800' : 'bg-blue-100 text-blue-700'}`}>
+                          {isChecked ? '✓' : u.name.charAt(0).toUpperCase()}
+                        </span>
+                    }
+                    {u.name}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+          {error && <p className="text-xs text-red-500 mt-1 px-2">{error}</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Inline multi-team picker used in the Reassign column ──────────────────────
+function TeamPicker({ currentTeams, ticketId, onSaved }) {
+  const [selected,  setSelected]  = useState(currentTeams || []);
+  const [saving,    setSaving]    = useState(false);
+  const [open,      setOpen]      = useState(false);
+  const [error,     setError]     = useState('');
+
+  const toggle = (team) =>
+    setSelected((prev) =>
+      prev.includes(team) ? prev.filter((t) => t !== team) : [...prev, team]
+    );
+
+  const save = async () => {
+    if (selected.length === 0) { setError('Select at least one team.'); return; }
+    setSaving(true);
+    setError('');
+    try {
+      const res  = await fetch(`/api/tickets/${ticketId}`, {
+        method:  'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ assignedTeams: selected }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed');
+      onSaved(data.ticket.assignedTeams);
+      setOpen(false);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="relative">
+      <button
+        onClick={(e) => { e.stopPropagation(); setOpen(!open); setSelected(currentTeams || []); }}
+        className="text-xs border border-gray-200 rounded-md px-2 py-1 bg-white hover:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400 whitespace-nowrap"
+      >
+        {currentTeams?.length ? currentTeams.join(', ') : 'Unassigned'} ▾
+      </button>
+
+      {open && (
+        <div
+          className="absolute z-30 left-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-lg p-3 min-w-[180px]"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <p className="text-xs font-semibold text-gray-600 mb-2">Assign teams</p>
+          {TEAM_OPTIONS.map((t) => (
+            <label key={t} className="flex items-center gap-2 py-1 cursor-pointer hover:text-blue-700">
+              <input
+                type="checkbox"
+                checked={selected.includes(t)}
+                onChange={() => toggle(t)}
+                className="accent-blue-600"
+              />
+              <span className="text-xs">{t}</span>
+            </label>
+          ))}
+          {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
+          <div className="flex gap-2 mt-3">
+            <button
+              onClick={save}
+              disabled={saving}
+              className="btn-primary text-xs px-2 py-1"
+            >
+              {saving ? <LoadingSpinner size="sm" /> : 'Save'}
+            </button>
+            <button
+              onClick={() => setOpen(false)}
+              className="btn-secondary text-xs px-2 py-1"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Main TicketTable ───────────────────────────────────────────────────────────
+export default function TicketTable({
+  tickets,
+  isAdmin          = false,
+  userTeam         = null,
+  userRole         = null,
+  allUsers         = [],   // active users for the assignment picker (admin only)
+  onTicketDeleted,
+  onClearFilters,
+  hasActiveFilters = false,
+}) {
+  const [overrides,     setOverrides]     = useState({});
+  const [updatingId,    setUpdatingId]    = useState(null);
+  const [updatingField, setUpdatingField] = useState(null);
+  const [error,         setError]         = useState('');
+  const [confirmDelete, setConfirmDelete] = useState(null);
+  const [deleting,      setDeleting]      = useState(false);
+
+  const merge = (ticket) => ({ ...ticket, ...(overrides[ticket.id] || {}) });
+
+  const handleAssigneeSaved = (ticketId, newAssignees) => {
+    setOverrides((prev) => ({ ...prev, [ticketId]: { ...prev[ticketId], assignees: newAssignees } }));
+  };
+
+  const canDelete = (ticket) => userRole === 'Admin';
+
+  const handleStatusChange = async (ticketId, newStatus, e) => {
+    e.stopPropagation();
+    setUpdatingId(ticketId);
+    setUpdatingField('status');
+    setError('');
+    try {
+      const res  = await fetch(`/api/tickets/${ticketId}`, {
+        method:  'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ status: newStatus }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to update');
+      setOverrides((prev) => ({ ...prev, [ticketId]: { ...prev[ticketId], status: newStatus } }));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setUpdatingId(null);
+      setUpdatingField(null);
+    }
+  };
+
+  const handleCategoryChange = async (ticketId, newCategory, e) => {
+    e.stopPropagation();
+    setUpdatingId(ticketId);
+    setUpdatingField('category');
+    setError('');
+    try {
+      const res  = await fetch(`/api/tickets/${ticketId}`, {
+        method:  'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ category: newCategory }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to update');
+      setOverrides((prev) => ({ ...prev, [ticketId]: { ...prev[ticketId], category: newCategory } }));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setUpdatingId(null);
+      setUpdatingField(null);
+    }
+  };
+
+  const handleTeamsSaved = (ticketId, newTeams) => {
+    setOverrides((prev) => ({ ...prev, [ticketId]: { ...prev[ticketId], assignedTeams: newTeams } }));
+  };
+
+  const handleDeleteConfirmed = async () => {
+    if (!confirmDelete) return;
+    setDeleting(true);
+    setError('');
+    try {
+      const res  = await fetch(`/api/tickets/${confirmDelete.id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Delete failed');
+      if (onTicketDeleted) onTicketDeleted(confirmDelete.id);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setDeleting(false);
+      setConfirmDelete(null);
+    }
+  };
+
+  const formatDate = (dateStr) =>
+    new Date(dateStr).toLocaleDateString('en-US', {
+      month: 'short', day: 'numeric', year: 'numeric',
+    });
+
+  if (!tickets || tickets.length === 0) {
+    return (
+      <div className="text-center py-16 text-gray-500">
+        <svg className="w-12 h-12 mx-auto mb-3 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+            d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+        </svg>
+        {hasActiveFilters ? (
+          <>
+            <p className="font-medium text-gray-700">No tickets match your filters</p>
+            <p className="text-sm mt-1 mb-4 text-gray-500">Try adjusting or clearing your filters.</p>
+            {onClearFilters && (
+              <button onClick={onClearFilters} className="btn-primary text-sm">Clear all filters</button>
+            )}
+          </>
+        ) : (
+          <>
+            <p className="font-medium">No tickets found</p>
+            <p className="text-sm mt-1">Tickets will appear here when submitted.</p>
+          </>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <>
+      {error && (
+        <div className="alert-error mb-4 flex items-center gap-2 text-sm">
+          <svg className="w-4 h-4 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+          </svg>
+          {error}
+        </div>
+      )}
+
+      {/* ── Desktop Table ──────────────────────────────────────────────────── */}
+      <div className="hidden md:block overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-gray-200 text-left">
+              <th className="pb-3 pr-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">#</th>
+              <th className="pb-3 pr-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Subject</th>
+              <th className="pb-3 pr-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Category</th>
+              <th className="pb-3 pr-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Teams</th>
+              <th className="pb-3 pr-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Priority</th>
+              <th className="pb-3 pr-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
+              {isAdmin && (
+                <th className="pb-3 pr-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Reassign</th>
+              )}
+              {isAdmin && (
+                <th className="pb-3 pr-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Assigned To</th>
+              )}
+              <th className="pb-3 pr-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Date</th>
+              <th className="pb-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {tickets.map((rawTicket) => {
+              const ticket  = merge(rawTicket);
+              const teams   = ticket.assignedTeams ?? (ticket.assignedTeam ? [ticket.assignedTeam] : []);
+              const showDel = canDelete(ticket);
+
+              return (
+                <tr key={ticket.id} className="hover:bg-gray-50 transition-colors group">
+                  {/* Ticket number */}
+                  <td className="py-3 pr-4 text-xs font-mono font-semibold text-gray-500 whitespace-nowrap">
+                    #{String(ticket.ticketNumber ?? '').padStart(3, '0')}
+                  </td>
+                  {/* Subject */}
+                  <td className="py-3 pr-4">
+                    <Link href={`/tickets/${ticket.id}`} className="block group-hover:text-blue-600">
+                      <div className="font-medium text-gray-900 truncate max-w-[200px] group-hover:text-blue-600" title={ticket.subject}>
+                        {ticket.subject}
+                      </div>
+                      <div className="text-xs text-gray-400 truncate max-w-[200px] mt-0.5">
+                        {ticket.description.substring(0, 55)}…
+                      </div>
+                    </Link>
+                  </td>
+
+                  {/* Category — dropdown for admin, badge for team members */}
+                  <td className="py-3 pr-4">
+                    {isAdmin ? (
+                      updatingId === ticket.id && updatingField === 'category' ? <LoadingSpinner size="sm" /> : (
+                        <select
+                          value={ticket.category}
+                          onChange={(e) => handleCategoryChange(ticket.id, e.target.value, e)}
+                          className="text-xs border border-gray-200 rounded-md px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400 cursor-pointer"
+                          aria-label={`Category for ${ticket.subject}`}
+                          disabled={updatingId === ticket.id}
+                        >
+                          {CATEGORY_OPTIONS.map((c) => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                      )
+                    ) : (
+                      <CategoryBadge category={ticket.category} />
+                    )}
+                  </td>
+                  <td className="py-3 pr-4"><TeamsDisplay assignedTeams={teams} /></td>
+                  <td className="py-3 pr-4"><PriorityBadge priority={ticket.priority} /></td>
+
+                  {/* Status dropdown */}
+                  <td className="py-3 pr-4">
+                    {updatingId === ticket.id && updatingField === 'status' ? <LoadingSpinner size="sm" /> : (
+                      <select
+                        value={ticket.status}
+                        onChange={(e) => handleStatusChange(ticket.id, e.target.value, e)}
+                        className="text-xs border border-gray-200 rounded-md px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400 cursor-pointer"
+                        aria-label={`Status for ${ticket.subject}`}
+                        disabled={updatingId === ticket.id || ticket.status === 'Signed Off' && !isAdmin}
+                      >
+                        {(isAdmin ? STATUS_OPTIONS_ADMIN : STATUS_OPTIONS).map((s) => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    )}
+                  </td>
+
+                  {/* Multi-team reassign — Admin only */}
+                  {isAdmin && (
+                    <td className="py-3 pr-4">
+                      <TeamPicker
+                        currentTeams={teams}
+                        ticketId={ticket.id}
+                        onSaved={(newTeams) => handleTeamsSaved(ticket.id, newTeams)}
+                      />
+                    </td>
+                  )}
+
+                  {/* Individual assignment — Admin only */}
+                  {isAdmin && (
+                    <td className="py-3 pr-4">
+                      <UserPicker
+                        currentAssignees={ticket.assignees ?? []}
+                        ticketId={ticket.id}
+                        allUsers={allUsers}
+                        onSaved={(newAssignees) => handleAssigneeSaved(ticket.id, newAssignees)}
+                      />
+                    </td>
+                  )}
+
+                  <td className="py-3 pr-4 text-gray-500 text-xs whitespace-nowrap">
+                    {formatDate(ticket.createdAt)}
+                  </td>
+
+                  {/* Actions */}
+                  <td className="py-3">
+                    <div className="flex items-center gap-1">
+                      <Link
+                        href={`/tickets/${ticket.id}`}
+                        className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                        title="View details"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                        </svg>
+                      </Link>
+                      {showDel && (
+                        <button
+                          onClick={() => setConfirmDelete(ticket)}
+                          className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                          title="Delete ticket"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                              d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* ── Mobile Cards ──────────────────────────────────────────────────────── */}
+      <div className="md:hidden space-y-4">
+        {tickets.map((rawTicket) => {
+          const ticket  = merge(rawTicket);
+          const teams   = ticket.assignedTeams ?? (ticket.assignedTeam ? [ticket.assignedTeam] : []);
+          const showDel = canDelete(ticket);
+          return (
+            <div key={ticket.id} className="border border-gray-200 rounded-lg p-4 bg-white">
+              <div className="flex items-start justify-between gap-2 mb-2">
+                <Link href={`/tickets/${ticket.id}`}
+                  className="font-medium text-gray-900 text-sm hover:text-blue-600">{ticket.subject}</Link>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <span className="text-xs font-mono font-semibold text-gray-400">#{String(ticket.ticketNumber ?? '').padStart(3, '0')}</span>
+                  <StatusBadge status={ticket.status} />
+                </div>
+              </div>
+              <p className="text-xs text-gray-500 mb-3 line-clamp-2">{ticket.description}</p>
+              <div className="flex flex-wrap gap-1.5 mb-3">
+                <TeamsDisplay assignedTeams={teams} />
+                <PriorityBadge priority={ticket.priority} />
+                <CategoryBadge category={ticket.category} />
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <select
+                  value={ticket.category}
+                  onChange={(e) => handleCategoryChange(ticket.id, e.target.value, e)}
+                  className="text-xs border border-gray-200 rounded-md px-2 py-1 bg-white"
+                  disabled={updatingId === ticket.id || !isAdmin}
+                  style={!isAdmin ? { pointerEvents: 'none' } : {}}
+                >
+                  {CATEGORY_OPTIONS.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+                <select
+                  value={ticket.status}
+                  onChange={(e) => handleStatusChange(ticket.id, e.target.value, e)}
+                  className="text-xs border border-gray-200 rounded-md px-2 py-1 bg-white flex-1"
+                  disabled={updatingId === ticket.id || (ticket.status === 'Signed Off' && !isAdmin)}
+                >
+                  {(isAdmin ? STATUS_OPTIONS_ADMIN : STATUS_OPTIONS).map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
+                {isAdmin && (
+                  <TeamPicker
+                    currentTeams={teams}
+                    ticketId={ticket.id}
+                    onSaved={(newTeams) => handleTeamsSaved(ticket.id, newTeams)}
+                  />
+                )}
+                <Link href={`/tickets/${ticket.id}`}
+                  className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 border border-gray-200">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                </Link>
+                {showDel && (
+                  <button onClick={() => setConfirmDelete(ticket)}
+                    className="p-1.5 rounded-lg text-red-400 hover:text-red-600 border border-red-200">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* ── Delete Confirmation Modal ──────────────────────────────────────────── */}
+      {confirmDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
+          role="dialog" aria-modal="true">
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center flex-shrink-0">
+                <svg className="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.834-1.964-.834-2.732 0L3.07 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                </svg>
+              </div>
+              <div>
+                <h3 className="font-semibold text-gray-900">Delete Ticket?</h3>
+                <p className="text-sm text-gray-500">This cannot be undone.</p>
+              </div>
+            </div>
+            <div className="bg-gray-50 rounded-lg p-3 mb-5 text-sm text-gray-700">
+              <span className="font-medium">"{confirmDelete.subject}"</span>
+            </div>
+            <div className="flex gap-3">
+              <button onClick={() => setConfirmDelete(null)} disabled={deleting} className="btn-secondary flex-1">Cancel</button>
+              <button onClick={handleDeleteConfirmed} disabled={deleting} className="btn-danger flex-1">
+                {deleting ? <><LoadingSpinner size="sm" /> Deleting…</> : 'Yes, Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
 </file>
 
 <file path="app/api/tickets/route.js">
@@ -11045,7 +11049,7 @@ export async function PATCH(request, { params }) {
     if (!user) return NextResponse.json({ error: 'Unauthorized.' }, { status: 401 });
 
     const body = await request.json();
-    const { status, assignedTeams, priority, category, assignedToId } = body;
+    const { status, assignedTeams, priority, category, assignedUserIds } = body;
 
     const ticket = await prisma.ticket.findUnique({
       where:   { id },
@@ -11061,7 +11065,7 @@ export async function PATCH(request, { params }) {
     if (assignedTeams && user.role !== 'Admin') {
       return NextResponse.json({ error: 'Only admins can reassign teams.' }, { status: 403 });
     }
-    if (assignedToId !== undefined && user.role !== 'Admin') {
+    if (assignedUserIds !== undefined && user.role !== 'Admin') {
       return NextResponse.json({ error: 'Only admins can assign tickets to individuals.' }, { status: 403 });
     }
     if (category && user.role !== 'Admin') {
@@ -11075,7 +11079,6 @@ export async function PATCH(request, { params }) {
     if (ticket.status === 'Signed Off' && status && status !== 'Signed Off' && user.role !== 'Admin') {
       return NextResponse.json({ error: 'Only admins can reopen a signed-off ticket.' }, { status: 403 });
     }
-    // TeamMembers cannot set status to Resolved if ticket is already Signed Off
     if (ticket.status === 'Signed Off' && status === 'Resolved') {
       return NextResponse.json({ error: 'Cannot change a signed-off ticket back to Resolved.' }, { status: 400 });
     }
@@ -11101,28 +11104,36 @@ export async function PATCH(request, { params }) {
     if (priority)      updateData.priority      = priority;
     if (category)      updateData.category      = category;
 
-    // Validate assignedToId — must be an active TeamMember if provided
-    let newAssignee = null;
-    if (assignedToId !== undefined) {
-      if (assignedToId === null) {
-        // Explicit null = unassign
-        updateData.assignedToId = null;
-      } else {
-        newAssignee = await prisma.user.findUnique({
-          where:  { id: assignedToId },
-          select: { id: true, name: true, email: true, role: true, team: true, isActive: true },
-        });
-        if (!newAssignee || !newAssignee.isActive) {
-          return NextResponse.json({ error: 'Assignee not found or inactive.' }, { status: 400 });
-        }
-        updateData.assignedToId = assignedToId;
+    // Handle multi-assignee via join table
+    let newAssignees = null;
+    if (assignedUserIds !== undefined) {
+      if (!Array.isArray(assignedUserIds)) {
+        return NextResponse.json({ error: 'assignedUserIds must be an array.' }, { status: 400 });
       }
+      // Validate all user IDs exist and are active
+      if (assignedUserIds.length > 0) {
+        const users = await prisma.user.findMany({
+          where: { id: { in: assignedUserIds }, isActive: true },
+          select: { id: true, name: true, email: true, team: true },
+        });
+        if (users.length !== assignedUserIds.length) {
+          return NextResponse.json({ error: 'One or more assignees not found or inactive.' }, { status: 400 });
+        }
+        newAssignees = users;
+      } else {
+        newAssignees = [];
+      }
+      // Replace assignees via connect/disconnect
+      updateData.assignees = {
+        deleteMany: {},
+        create: assignedUserIds.map(uid => ({ userId: uid })),
+      };
     }
 
     const updated = await prisma.ticket.update({
       where:   { id },
       data:    updateData,
-      include: { assignedTo: { select: { id: true, name: true, email: true, team: true } } },
+      include: { assignees: { include: { user: { select: { id: true, name: true, email: true, team: true } } } } },
     });
 
     // ── Audit logs ────────────────────────────────────────────────────────────
@@ -11176,27 +11187,24 @@ export async function PATCH(request, { params }) {
       });
     }
 
-    if (assignedToId !== undefined && assignedToId !== ticket.assignedToId) {
-      if (assignedToId === null) {
+    if (assignedUserIds !== undefined && newAssignees !== null) {
+      const oldNames = (ticket.assignees || []).map(a => a.user?.name).filter(Boolean).join(', ') || 'None';
+      const newNames = newAssignees.map(u => u.name).join(', ') || 'None';
+      if (oldNames !== newNames) {
         await logActivity({
           ticketId: id,
           action:   ACTIONS.ASSIGNED_TO,
-          detail:   buildDetail.unassigned(user),
-          oldValue: ticket.assignedTo?.name ?? null,
-          newValue: null,
+          detail:   newAssignees.length === 0
+            ? buildDetail.unassigned(user)
+            : buildDetail.assignedTo(user, newNames),
+          oldValue: oldNames,
+          newValue: newNames,
           actor:    user,
         });
-      } else if (newAssignee) {
-        await logActivity({
-          ticketId: id,
-          action:   ACTIONS.ASSIGNED_TO,
-          detail:   buildDetail.assignedTo(user, newAssignee.name),
-          oldValue: ticket.assignedTo?.name ?? null,
-          newValue: newAssignee.name,
-          actor:    user,
-        });
-        // Notify the newly assigned person
-        await sendTicketAssigned(updated, newAssignee, user);
+        // Email all newly added assignees
+        const oldIds = (ticket.assignees || []).map(a => a.userId);
+        const addedAssignees = newAssignees.filter(u => !oldIds.includes(u.id));
+        await Promise.allSettled(addedAssignees.map(a => sendTicketAssigned(updated, a, user)));
       }
     }
 
