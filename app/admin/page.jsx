@@ -54,8 +54,10 @@ export default function AdminPage() {
     setLoading(true);
     setError('');
     try {
+      // Pass status filter to API so signed-off tickets come through when explicitly requested
+      const statusParam = filters.status ? `?status=${encodeURIComponent(filters.status)}` : '';
       const [ticketsRes, usersRes] = await Promise.all([
-        fetch('/api/tickets'),
+        fetch(`/api/tickets${statusParam}`),
         fetch('/api/users/active'),
       ]);
       const ticketsData = await ticketsRes.json();
@@ -68,7 +70,7 @@ export default function AdminPage() {
     } finally {
       setLoading(false);
     }
-  }, [user]);
+  }, [user, filters.status]);
 
   const checkAiStatus = async () => {
     setAiChecking(true);
@@ -86,10 +88,10 @@ export default function AdminPage() {
   useEffect(() => {
     fetchTickets();
   }, [fetchTickets]);
-
   // Client-side filtering + search
   useEffect(() => {
     let result = [...tickets];
+    // Status is already filtered at API level, but apply for any client-side refinement
     if (filters.status) result = result.filter((t) => t.status === filters.status);
     if (filters.category) result = result.filter((t) => t.category === filters.category);
     if (filters.priority) result = result.filter((t) => t.priority === filters.priority);

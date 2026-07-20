@@ -8,7 +8,7 @@
  *   isAdmin: boolean
  */
 export default function FilterBar({ filters, onChange, isAdmin = false }) {
-  const statuses = ['', 'Open', 'In Progress', 'Resolved'];
+  const statuses = ['', 'Open', 'In Progress', 'Resolved', 'Signed Off'];
   const categories = ['', 'Billing', 'Bug', 'Feature Request', 'HR', 'Other', 'Out of Scope'];
   const priorities = ['', 'High', 'Medium', 'Low'];
   const teams = ['', 'Development', 'Billing', 'HR', 'Support'];
