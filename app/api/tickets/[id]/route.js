@@ -25,7 +25,7 @@ import {
 const VALID_TEAMS      = ['Development', 'Billing', 'HR', 'Support'];
 const VALID_STATUSES   = ['Open', 'In Progress', 'Resolved', 'Signed Off'];
 const VALID_PRIORITIES = ['Low', 'Medium', 'High'];
-const VALID_CATEGORIES = ['Bug', 'Feature Request', 'Billing', 'HR', 'Other'];
+const VALID_CATEGORIES = ['Bug', 'Feature Request', 'Billing', 'HR', 'Other', 'Out of Scope'];
 
 /** Returns true if the user can access this ticket */
 function userCanAccessTicket(user, ticket) {
@@ -102,14 +102,19 @@ export async function PATCH(request, { params }) {
     }
     // TeamMembers AND Admins can only change normal status (Open/In Progress/Resolved)
     // on tickets assigned to them.
-    // Exception: Admin can sign off any Resolved ticket, and reopen any Signed Off ticket.
+    // Exception 1: Admin can sign off any Resolved ticket, and reopen any Signed Off ticket.
+    // Exception 2: Admin can directly resolve Out of Scope tickets without assignment.
     const NORMAL_STATUSES = new Set(['Open', 'In Progress', 'Resolved']);
     if (status && NORMAL_STATUSES.has(status) && ticket.status !== 'Signed Off') {
-      // This is a normal status change — user must be assigned
-      const isAssigned = ticket.assignees?.some(a => a.userId === user.id);
-      if (!isAssigned) {
-        const who = user.role === 'Admin' ? 'Admins' : 'Team members';
-        return NextResponse.json({ error: `${who} can only change the status of tickets assigned to them.` }, { status: 403 });
+      const isOutOfScope = ticket.category === 'Out of Scope' || category === 'Out of Scope';
+      const isAdminResolvingOutOfScope = user.role === 'Admin' && status === 'Resolved' && isOutOfScope;
+
+      if (!isAdminResolvingOutOfScope) {
+        const isAssigned = ticket.assignees?.some(a => a.userId === user.id);
+        if (!isAssigned) {
+          const who = user.role === 'Admin' ? 'Admins' : 'Team members';
+          return NextResponse.json({ error: `${who} can only change the status of tickets assigned to them.` }, { status: 403 });
+        }
       }
     }
     // Only admins can sign off a ticket, and only when it's Resolved

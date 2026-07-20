@@ -15,7 +15,7 @@ import LoadingSpinner from './LoadingSpinner';
 
 const STATUS_OPTIONS        = ['Open', 'In Progress', 'Resolved'];
 const STATUS_OPTIONS_ADMIN  = ['Open', 'In Progress', 'Resolved', 'Signed Off'];
-const CATEGORY_OPTIONS = ['Bug', 'Feature Request', 'Billing', 'HR', 'Other'];
+const CATEGORY_OPTIONS = ['Bug', 'Feature Request', 'Billing', 'HR', 'Other', 'Out of Scope'];
 const TEAM_OPTIONS     = ['Development', 'Billing', 'HR', 'Support'];
 
 // ── Inline user assignment picker — Admin only ────────────────────────────────

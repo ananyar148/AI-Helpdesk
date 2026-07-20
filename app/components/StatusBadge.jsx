@@ -43,6 +43,7 @@ export function CategoryBadge({ category }) {
     'Feature Request': 'bg-indigo-100 text-indigo-700',
     HR: 'bg-pink-100 text-pink-700',
     Other: 'bg-gray-100 text-gray-600',
+    'Out of Scope': 'bg-zinc-100 text-zinc-600',
   };
   return (
     <span className={`badge ${colorMap[category] || 'bg-gray-100 text-gray-600'}`}>
