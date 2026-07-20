@@ -30,6 +30,7 @@ const ACTION_CONFIG = {
   follow_up_added:    { icon: '↩️',  label: 'Follow-up Added',     color: 'bg-blue-100 text-blue-700'   },
   signed_off:         { icon: '✅',  label: 'Signed Off',          color: 'bg-purple-100 text-purple-700' },
   reopened:           { icon: '🔄', label: 'Reopened',            color: 'bg-orange-100 text-orange-700' },
+  intervention_requested: { icon: '🆘', label: 'Intervention Requested', color: 'bg-red-100 text-red-700' },
   work_log:           { icon: '📝', label: 'Work Log',            color: 'bg-teal-100 text-teal-700'   },
 };
 
@@ -183,11 +184,20 @@ export default function ActivityTimeline({
   ticketId,
   canAddLog  = false,
   onLogAdded,
+  allUsers   = [],   // active users for intervention picker
 }) {
-  const [note,       setNote]       = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  const [formError,  setFormError]  = useState('');
-  const [formOk,     setFormOk]     = useState('');
+  const [note,           setNote]           = useState('');
+  const [submitting,     setSubmitting]     = useState(false);
+  const [formError,      setFormError]      = useState('');
+  const [formOk,         setFormOk]         = useState('');
+
+  // Intervention request state
+  const [showIntervention,   setShowIntervention]   = useState(false);
+  const [recipientId,        setRecipientId]        = useState('');
+  const [interventionMsg,    setInterventionMsg]    = useState('');
+  const [sendingIntervention,setSendingIntervention]= useState(false);
+  const [interventionOk,     setInterventionOk]     = useState('');
+  const [interventionErr,    setInterventionErr]    = useState('');
 
   // Merge and sort all entries newest-first
   const merged = [
@@ -226,7 +236,6 @@ export default function ActivityTimeline({
     return () => observer.disconnect();
   }, [hasMore, loadMore]);
 
-  // ── Work log form ─────────────────────────────────────────────────────────
   const handleAddLog = async (e) => {
     e.preventDefault();
     if (!note.trim()) return;
@@ -252,6 +261,30 @@ export default function ActivityTimeline({
     }
   };
 
+  const handleSendIntervention = async () => {
+    if (!recipientId) { setInterventionErr('Please select a recipient.'); return; }
+    setSendingIntervention(true);
+    setInterventionErr('');
+    setInterventionOk('');
+    try {
+      const res  = await fetch(`/api/tickets/${ticketId}/request-intervention`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ recipientId, message: interventionMsg.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to send');
+      setInterventionOk(data.message);
+      setInterventionMsg('');
+      setRecipientId('');
+      setTimeout(() => { setInterventionOk(''); setShowIntervention(false); }, 3000);
+    } catch (err) {
+      setInterventionErr(err.message);
+    } finally {
+      setSendingIntervention(false);
+    }
+  };
+
   const visible = merged.slice(0, visibleCount);
 
   return (
@@ -274,6 +307,86 @@ export default function ActivityTimeline({
             {submitting ? <><LoadingSpinner size="sm" /> Adding…</> : 'Add Work Log'}
           </button>
         </form>
+      )}
+
+      {/* Request Intervention — visible when user can add logs and there are other users */}
+      {canAddLog && allUsers.length > 0 && (
+        <div className="mb-4">
+          {!showIntervention ? (
+            <button
+              onClick={() => setShowIntervention(true)}
+              className="text-xs text-orange-600 hover:text-orange-700 font-medium flex items-center gap-1.5 px-3 py-1.5 border border-orange-200 rounded-lg hover:bg-orange-50 transition-colors"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M18.364 5.636l-3.536 3.536m0 5.656l3.536 3.536M9.172 9.172L5.636 5.636m3.536 9.192l-3.536 3.536M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-5 0a4 4 0 11-8 0 4 4 0 018 0z"/>
+              </svg>
+              Request Intervention
+            </button>
+          ) : (
+            <div className="p-4 bg-orange-50 border border-orange-200 rounded-xl">
+              <p className="text-xs font-semibold text-orange-700 uppercase mb-3">Request Intervention</p>
+
+              {interventionOk && <p className="text-sm text-green-600 mb-2">{interventionOk}</p>}
+              {interventionErr && <p className="text-sm text-red-600 mb-2">{interventionErr}</p>}
+
+              <div className="mb-3">
+                <label className="text-xs font-medium text-gray-600 block mb-1">Send to <span className="text-red-500">*</span></label>
+                <select
+                  value={recipientId}
+                  onChange={e => setRecipientId(e.target.value)}
+                  className="input-field text-sm"
+                  disabled={sendingIntervention}
+                >
+                  <option value="">— Select admin or team member —</option>
+                  {Object.entries(
+                    allUsers.reduce((acc, u) => {
+                      const group = u.role === 'Admin' ? 'Admins' : (u.team || 'Other');
+                      if (!acc[group]) acc[group] = [];
+                      acc[group].push(u);
+                      return acc;
+                    }, {})
+                  ).map(([group, members]) => (
+                    <optgroup key={group} label={group}>
+                      {members.map(u => (
+                        <option key={u.id} value={u.id}>{u.name}</option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+              </div>
+
+              <div className="mb-3">
+                <label className="text-xs font-medium text-gray-600 block mb-1">Message (optional)</label>
+                <textarea
+                  value={interventionMsg}
+                  onChange={e => setInterventionMsg(e.target.value)}
+                  rows={2}
+                  placeholder="Describe what you need help with…"
+                  className="input-field resize-none text-sm"
+                  disabled={sendingIntervention}
+                />
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  onClick={handleSendIntervention}
+                  disabled={sendingIntervention || !recipientId}
+                  className="btn-primary text-sm bg-orange-600 hover:bg-orange-700 focus:ring-orange-500"
+                >
+                  {sendingIntervention ? <><LoadingSpinner size="sm" /> Sending…</> : 'Send Request'}
+                </button>
+                <button
+                  onClick={() => { setShowIntervention(false); setInterventionErr(''); setInterventionOk(''); setRecipientId(''); setInterventionMsg(''); }}
+                  className="btn-secondary text-sm"
+                  disabled={sendingIntervention}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
       )}
 
       {merged.length === 0 ? (

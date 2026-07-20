@@ -407,6 +407,7 @@ export default function TicketDetailPage() {
                 workLogs={workLogs}
                 ticketId={id}
                 canAddLog={canAddLog}
+                allUsers={allUsers}
                 onLogAdded={(newLog) => {
                   setWorkLogs((prev) => [...prev, newLog]);
                   // Also refresh activities so the work_log_added event appears
