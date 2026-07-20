@@ -427,7 +427,10 @@ export default function TicketDetailPage() {
                 onChange={(e) => handleUpdate('status', e.target.value)}
                 disabled={updating || (ticket.status === 'Signed Off' && user?.role !== 'Admin')}
                 className="input-field mt-1">
-                {(user?.role === 'Admin' ? STATUS_OPTIONS_ADMIN : STATUS_OPTIONS).map((s) => (
+                {(user?.role === 'Admin'
+                  ? (ticket.status === 'Resolved' ? STATUS_OPTIONS_ADMIN : STATUS_OPTIONS_ADMIN.filter(s => s !== 'Signed Off'))
+                  : STATUS_OPTIONS
+                ).map((s) => (
                   <option key={s} value={s}>{s}</option>
                 ))}
               </select>

@@ -285,18 +285,22 @@ function TicketCard({ ticket, clientEmail, onFollowUpSuccess }) {
             <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Description</p>
             <p className="text-sm text-gray-700 whitespace-pre-wrap">{ticket.description}</p>
           </div>
-          {ticket.draftResponse && (
-            <div className="bg-blue-50 border border-blue-100 rounded-lg p-4">
-              <p className="text-xs font-medium text-blue-700 uppercase tracking-wide mb-1.5">✨ AI Suggested Response</p>
-              <p className="text-sm text-blue-800 whitespace-pre-wrap">{ticket.draftResponse}</p>
-            </div>
-          )}
 
-          {/* Conversation thread — team messages + client follow-ups */}
-          {ticket.activities?.length > 0 && (
+          {/* Conversation — AI response first, then team/client messages */}
+          {(ticket.draftResponse || ticket.activities?.length > 0) && (
             <div className="space-y-2">
               <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Conversation</p>
-              {ticket.activities.map(act => {
+              {ticket.draftResponse && (
+                <div className="rounded-lg p-3.5 bg-indigo-50 border border-indigo-200 mr-4">
+                  <div className="flex items-center gap-1.5 mb-1.5">
+                    <span className="inline-flex items-center justify-center w-5 h-5 rounded-full text-xs bg-indigo-200 text-indigo-800">✨</span>
+                    <span className="text-xs font-semibold text-indigo-800">Support Team</span>
+                    <span className="text-xs px-1.5 py-0.5 rounded-full font-medium bg-indigo-100 text-indigo-700">AI Response</span>
+                  </div>
+                  <p className="text-sm leading-snug whitespace-pre-wrap text-indigo-900">{ticket.draftResponse}</p>
+                </div>
+              )}
+              {ticket.activities?.map(act => {
                 const isClientMessage = act.action === 'details_provided' || act.action === 'follow_up_added';
                 return (
                   <div key={act.id} className={`rounded-lg p-3.5 ${isClientMessage
@@ -310,19 +314,14 @@ function TicketCard({ ticket, clientEmail, onFollowUpSuccess }) {
                           {isClientMessage ? 'Y' : (act.userName ? act.userName.charAt(0).toUpperCase() : '?')}
                         </span>
                         <span className={`text-xs font-semibold ${isClientMessage ? 'text-blue-800' : 'text-amber-800'}`}>
-                          {isClientMessage
-                            ? 'You'
-                            : `${act.userName || 'Support'}${act.userTeam ? ` · ${act.userTeam}` : ''}`
-                          }
+                          {isClientMessage ? 'You' : `${act.userName || 'Support'}${act.userTeam ? ` · ${act.userTeam}` : ''}`}
                         </span>
                         <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
                           act.action === 'details_requested' ? 'bg-amber-100 text-amber-700' :
-                          act.action === 'follow_up_added'   ? 'bg-blue-100 text-blue-700' :
-                                                               'bg-green-100 text-green-700'
+                          act.action === 'follow_up_added'   ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'
                         }`}>
                           {act.action === 'details_requested' ? 'Requesting details' :
-                           act.action === 'follow_up_added'   ? 'Follow-up' :
-                                                                'Additional details'}
+                           act.action === 'follow_up_added' ? 'Follow-up' : 'Additional details'}
                         </span>
                       </div>
                       <time className={`text-xs flex-shrink-0 ${isClientMessage ? 'text-blue-500' : 'text-amber-600'}`}>

@@ -100,9 +100,24 @@ export async function PATCH(request, { params }) {
     if (category && user.role !== 'Admin') {
       return NextResponse.json({ error: 'Only admins can change the category.' }, { status: 403 });
     }
-    // Only admins can sign off a ticket
+    // TeamMembers AND Admins can only change normal status (Open/In Progress/Resolved)
+    // on tickets assigned to them.
+    // Exception: Admin can sign off any Resolved ticket, and reopen any Signed Off ticket.
+    const NORMAL_STATUSES = new Set(['Open', 'In Progress', 'Resolved']);
+    if (status && NORMAL_STATUSES.has(status) && ticket.status !== 'Signed Off') {
+      // This is a normal status change — user must be assigned
+      const isAssigned = ticket.assignees?.some(a => a.userId === user.id);
+      if (!isAssigned) {
+        const who = user.role === 'Admin' ? 'Admins' : 'Team members';
+        return NextResponse.json({ error: `${who} can only change the status of tickets assigned to them.` }, { status: 403 });
+      }
+    }
+    // Only admins can sign off a ticket, and only when it's Resolved
     if (status === 'Signed Off' && user.role !== 'Admin') {
       return NextResponse.json({ error: 'Only admins can sign off tickets.' }, { status: 403 });
+    }
+    if (status === 'Signed Off' && ticket.status !== 'Resolved') {
+      return NextResponse.json({ error: 'Only Resolved tickets can be signed off.' }, { status: 400 });
     }
     // A Signed Off ticket can only be reopened by an admin
     if (ticket.status === 'Signed Off' && status && status !== 'Signed Off' && user.role !== 'Admin') {

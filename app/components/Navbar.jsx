@@ -15,16 +15,14 @@ export default function Navbar() {
   const pathname = usePathname();
 
   const [user,     setUser]     = useState(null);
-  const [loading,  setLoading]  = useState(true);   // true until first auth check completes
+  const [loading,  setLoading]  = useState(true);
   const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
     setLoading(true);
     fetch('/api/team-auth/me')
       .then((r) => r.ok ? r.json() : null)
-      .then((data) => {
-        setUser(data?.user ?? null);
-      })
+      .then((data) => { setUser(data?.user ?? null); })
       .catch(() => { setUser(null); })
       .finally(() => setLoading(false));
   }, [pathname]);
@@ -55,7 +53,7 @@ export default function Navbar() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
 
-          {/* Logo — always visible */}
+          {/* Logo */}
           <Link href="/" className="flex items-center gap-2">
             <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
               <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -67,7 +65,7 @@ export default function Navbar() {
             <span className="hidden sm:block text-xs text-blue-600 font-medium bg-blue-50 px-2 py-0.5 rounded-full">AI</span>
           </Link>
 
-          {/* Desktop links — hidden while loading to prevent flash */}
+          {/* Desktop links */}
           <div className="hidden md:flex items-center gap-1">
             {!loading && navLinks.map((link) => (
               <Link key={link.href} href={link.href}
@@ -81,10 +79,9 @@ export default function Navbar() {
             ))}
           </div>
 
-          {/* Right side — skeleton while loading, then real content */}
+          {/* Right side */}
           <div className="hidden md:flex items-center gap-3">
             {loading ? (
-              /* Subtle skeleton — same height as real content, no visible shift */
               <div className="flex items-center gap-3 animate-pulse">
                 <div className="h-4 w-24 bg-gray-100 rounded" />
                 <div className="w-8 h-8 bg-gray-100 rounded-full" />

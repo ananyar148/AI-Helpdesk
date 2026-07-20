@@ -1244,6 +1244,11 @@ export default function Error({ error, reset }) {
     @apply bg-gray-50 text-gray-900 antialiased;
   }
 
+  /* Dark mode body */
+  .dark body {
+    @apply bg-gray-900 text-gray-100;
+  }
+
   * {
     @apply box-border;
   }
@@ -1591,6 +1596,7 @@ module.exports = {
     './components/**/*.{js,jsx}',
     './lib/**/*.{js,jsx}',
   ],
+  darkMode: 'class',
   theme: {
     extend: {
       colors: {
@@ -3972,169 +3978,6 @@ export function TeamsDisplay({ assignedTeams, assignedTeam }) {
 }
 </file>
 
-<file path="app/portal/login/page.jsx">
-'use client';
-
-/**
- * /portal/login
- * Client sign-in — email + password.
- * On success → redirects to /portal/dashboard.
- */
-
-import { useState }   from 'react';
-import { signIn }     from 'next-auth/react';
-import { useRouter }  from 'next/navigation';
-import Link           from 'next/link';
-import LoadingSpinner from '../../components/LoadingSpinner';
-
-export default function ClientLoginPage() {
-  const router = useRouter();
-
-  const [email,    setEmail]    = useState('');
-  const [password, setPassword] = useState('');
-  const [showPw,   setShowPw]   = useState(false);
-  const [loading,  setLoading]  = useState(false);
-  const [error,    setError]    = useState('');
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setError('');
-    if (!email.trim() || !password) { setError('Email and password are required.'); return; }
-
-    setLoading(true);
-    try {
-      const res  = await fetch('/api/portal/client-auth/login', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ email: email.trim(), password }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Sign in failed');
-      router.push('/portal/dashboard');
-    } catch (err) {
-      setError(err.message);
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50 flex items-center justify-center px-4 py-12">
-      <div className="w-full max-w-md">
-
-        {/* Logo */}
-        <div className="text-center mb-8">
-          <Link href="/portal" className="inline-flex items-center gap-2 mb-6">
-            <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center shadow">
-              <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                  d="M18.364 5.636l-3.536 3.536m0 5.656l3.536 3.536M9.172 9.172L5.636 5.636m3.536 9.192l-3.536 3.536M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-5 0a4 4 0 11-8 0 4 4 0 018 0z" />
-              </svg>
-            </div>
-            <span className="text-xl font-bold text-gray-900">HelpDesk</span>
-          </Link>
-          <h1 className="text-2xl font-bold text-gray-900">Welcome back</h1>
-          <p className="text-gray-500 text-sm mt-1">Sign in to your support account</p>
-        </div>
-
-        <div className="card shadow-md">
-
-          {/* Google sign-in option */}
-          <button
-            onClick={() => signIn('google', { callbackUrl: '/portal/dashboard' })}
-            className="w-full flex items-center justify-center gap-3 px-4 py-3 border border-gray-300 rounded-lg bg-white hover:bg-gray-50 transition-colors text-sm font-medium text-gray-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 mb-4"
-          >
-            <svg className="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24">
-              <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
-              <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
-              <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
-              <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.47 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
-            </svg>
-            Continue with Google
-          </button>
-
-          <div className="flex items-center gap-3 mb-4">
-            <div className="flex-1 border-t border-gray-200" />
-            <span className="text-xs text-gray-400 font-medium">or sign in with email</span>
-            <div className="flex-1 border-t border-gray-200" />
-          </div>
-
-          {error && (
-            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 flex items-start gap-2">
-              <svg className="w-4 h-4 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd"/>
-              </svg>
-              {error}
-            </div>
-          )}
-
-          <form onSubmit={handleSubmit} noValidate className="space-y-4">
-            <div>
-              <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
-                Email Address
-              </label>
-              <input
-                id="email" type="email" value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@example.com"
-                className="input-field" required autoComplete="email"
-                disabled={loading} autoFocus
-              />
-            </div>
-
-            <div>
-              <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
-                Password
-              </label>
-              <div className="relative">
-                <input
-                  id="password"
-                  type={showPw ? 'text' : 'password'}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Your password"
-                  className="input-field pr-10"
-                  required autoComplete="current-password" disabled={loading}
-                />
-                <button type="button" onClick={() => setShowPw(s => !s)} tabIndex={-1}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                  aria-label={showPw ? 'Hide password' : 'Show password'}>
-                  {showPw
-                    ? <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"/></svg>
-                    : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0zM2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
-                  }
-                </button>
-              </div>
-            </div>
-
-            <button
-              type="submit"
-              disabled={loading || !email.trim() || !password}
-              className="btn-primary w-full py-2.5"
-            >
-              {loading ? <><LoadingSpinner size="sm" /> Signing in…</> : 'Sign In'}
-            </button>
-          </form>
-
-          <p className="text-center text-sm text-gray-500 mt-5">
-            Don't have an account?{' '}
-            <Link href="/portal/signup" className="text-blue-600 hover:text-blue-700 font-medium">
-              Create one
-            </Link>
-          </p>
-        </div>
-
-        <div className="mt-5 text-center">
-          <p className="text-sm text-gray-500">
-            Team member?{' '}
-            <Link href="/login" className="text-blue-600 hover:text-blue-700 font-medium">Team login →</Link>
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-}
-</file>
-
 <file path="next.config.js">
 /** @type {import('next').NextConfig} */
 const nextConfig = {
@@ -4382,6 +4225,175 @@ export default function LoginPage() {
             Submit a ticket
           </Link>
         </p>
+      </div>
+    </div>
+  );
+}
+</file>
+
+<file path="app/portal/login/page.jsx">
+'use client';
+
+/**
+ * /portal/login
+ * Client sign-in — email + password.
+ * On success → redirects to /portal/dashboard.
+ */
+
+import { useState }        from 'react';
+import { signIn, signOut } from 'next-auth/react';
+import { useRouter }       from 'next/navigation';
+import Link                from 'next/link';
+import LoadingSpinner from '../../components/LoadingSpinner';
+
+export default function ClientLoginPage() {
+  const router = useRouter();
+
+  const [email,    setEmail]    = useState('');
+  const [password, setPassword] = useState('');
+  const [showPw,   setShowPw]   = useState(false);
+  const [loading,  setLoading]  = useState(false);
+  const [error,    setError]    = useState('');
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+    if (!email.trim() || !password) { setError('Email and password are required.'); return; }
+
+    setLoading(true);
+    try {
+      // Clear any existing sessions first — both email/password cookie AND Google OAuth
+      await Promise.allSettled([
+        fetch('/api/portal/client-auth/logout', { method: 'POST' }),
+        signOut({ redirect: false }),
+      ]);
+
+      const res  = await fetch('/api/portal/client-auth/login', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ email: email.trim(), password }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Sign in failed');
+      router.push('/portal/dashboard');
+    } catch (err) {
+      setError(err.message);
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50 flex items-center justify-center px-4 py-12">
+      <div className="w-full max-w-md">
+
+        {/* Logo */}
+        <div className="text-center mb-8">
+          <Link href="/portal" className="inline-flex items-center gap-2 mb-6">
+            <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center shadow">
+              <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M18.364 5.636l-3.536 3.536m0 5.656l3.536 3.536M9.172 9.172L5.636 5.636m3.536 9.192l-3.536 3.536M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-5 0a4 4 0 11-8 0 4 4 0 018 0z" />
+              </svg>
+            </div>
+            <span className="text-xl font-bold text-gray-900">HelpDesk</span>
+          </Link>
+          <h1 className="text-2xl font-bold text-gray-900">Welcome back</h1>
+          <p className="text-gray-500 text-sm mt-1">Sign in to your support account</p>
+        </div>
+
+        <div className="card shadow-md">
+
+          {/* Google sign-in option */}
+          <button
+            onClick={() => signIn('google', { callbackUrl: '/portal/dashboard' })}
+            className="w-full flex items-center justify-center gap-3 px-4 py-3 border border-gray-300 rounded-lg bg-white hover:bg-gray-50 transition-colors text-sm font-medium text-gray-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 mb-4"
+          >
+            <svg className="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24">
+              <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+              <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+              <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+              <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.47 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+            </svg>
+            Continue with Google
+          </button>
+
+          <div className="flex items-center gap-3 mb-4">
+            <div className="flex-1 border-t border-gray-200" />
+            <span className="text-xs text-gray-400 font-medium">or sign in with email</span>
+            <div className="flex-1 border-t border-gray-200" />
+          </div>
+
+          {error && (
+            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 flex items-start gap-2">
+              <svg className="w-4 h-4 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd"/>
+              </svg>
+              {error}
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit} noValidate className="space-y-4">
+            <div>
+              <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
+                Email Address
+              </label>
+              <input
+                id="email" type="email" value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@example.com"
+                className="input-field" required autoComplete="email"
+                disabled={loading} autoFocus
+              />
+            </div>
+
+            <div>
+              <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
+                Password
+              </label>
+              <div className="relative">
+                <input
+                  id="password"
+                  type={showPw ? 'text' : 'password'}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Your password"
+                  className="input-field pr-10"
+                  required autoComplete="current-password" disabled={loading}
+                />
+                <button type="button" onClick={() => setShowPw(s => !s)} tabIndex={-1}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  aria-label={showPw ? 'Hide password' : 'Show password'}>
+                  {showPw
+                    ? <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"/></svg>
+                    : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0zM2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                  }
+                </button>
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading || !email.trim() || !password}
+              className="btn-primary w-full py-2.5"
+            >
+              {loading ? <><LoadingSpinner size="sm" /> Signing in…</> : 'Sign In'}
+            </button>
+          </form>
+
+          <p className="text-center text-sm text-gray-500 mt-5">
+            Don't have an account?{' '}
+            <Link href="/portal/signup" className="text-blue-600 hover:text-blue-700 font-medium">
+              Create one
+            </Link>
+          </p>
+        </div>
+
+        <div className="mt-5 text-center">
+          <p className="text-sm text-gray-500">
+            Team member?{' '}
+            <Link href="/login" className="text-blue-600 hover:text-blue-700 font-medium">Team login →</Link>
+          </p>
+        </div>
       </div>
     </div>
   );
@@ -6569,771 +6581,6 @@ export async function classifyTicket(subject, description, existingTickets = [])
 }
 </file>
 
-<file path="app/portal/dashboard/page.jsx">
-'use client';
-
-/**
- * Client Portal Dashboard — /portal/dashboard
- * Google-authenticated clients see all tickets tied to their account.
- * Fetches by clientUserId (Google session) and also by email for legacy tickets.
- */
-
-import { useState, useEffect, useCallback, useRef } from 'react';import { useSession, signOut } from 'next-auth/react';
-import { useRouter }           from 'next/navigation';
-import Link                    from 'next/link';
-import LoadingSpinner          from '../../components/LoadingSpinner';
-
-const MAX_SUBJECT     = 150;
-const MAX_DESCRIPTION = 2000;
-const MAX_FILE_MB     = 5;
-const MAX_FILES       = 25;
-const ACCEPTED_TYPES  = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-
-const STATUS_COLORS = {
-  'Open':        'bg-blue-100 text-blue-700',
-  'In Progress': 'bg-yellow-100 text-yellow-700',
-  'Resolved':    'bg-green-100 text-green-700',
-  'Signed Off':  'bg-purple-100 text-purple-700',
-};
-
-const PRIORITY_COLORS = {
-  'Low':      'bg-gray-100 text-gray-600',
-  'Medium':   'bg-blue-50 text-blue-600',
-  'High':     'bg-orange-100 text-orange-700',
-  'Critical': 'bg-red-100 text-red-700',
-};
-
-function formatDate(d) {
-  return new Date(d).toLocaleDateString('en-US', {
-    month: 'short', day: 'numeric', year: 'numeric',
-  });
-}
-
-function fileToDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload  = () => resolve(reader.result);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
-
-// ─── Ticket submission form ───────────────────────────────────────────────────
-function TicketForm({ clientEmail, onSuccess, parentTicket = null, onCancel }) {
-  const [subject,     setSubject]     = useState(parentTicket ? `Re: ${parentTicket.subject}` : '');
-  const [description, setDescription] = useState('');
-  const [attachments, setAttachments] = useState([]);
-  const [phase,       setPhase]       = useState('idle');
-  const [error,       setError]       = useState('');
-  const [dupInfo,     setDupInfo]     = useState(null);
-  const [preClass,    setPreClass]    = useState(null);
-  const fileRef = useRef(null);
-  const isLoading = phase === 'checking' || phase === 'creating';
-
-  const handleFiles = async (files) => {
-    setError('');
-    const incoming = Array.from(files);
-    if (attachments.length + incoming.length > MAX_FILES) {
-      setError(`Maximum ${MAX_FILES} images allowed.`); return;
-    }
-    const processed = [];
-    for (const file of incoming) {
-      if (!ACCEPTED_TYPES.includes(file.type)) {
-        setError(`"${file.name}" must be JPEG, PNG, GIF or WebP.`); return;
-      }
-      if (file.size > MAX_FILE_MB * 1024 * 1024) {
-        setError(`"${file.name}" exceeds ${MAX_FILE_MB} MB.`); return;
-      }
-      const dataUrl = await fileToDataUrl(file);
-      processed.push({ fileName: file.name, mimeType: file.type, dataUrl, sizeBytes: file.size });
-    }
-    setAttachments((p) => [...p, ...processed]);
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setError('');
-    if (parentTicket) { await createTicket({}); return; }
-    setPhase('checking');
-    try {
-      const res  = await fetch('/api/portal/tickets/check-duplicate', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ subject: subject.trim(), description: description.trim() }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Check failed');
-      if (data.isDuplicate && data.existingTicket) {
-        setDupInfo({ existingTicket: data.existingTicket, score: data.score });
-        setPreClass(data.classification);
-        setPhase('duplicate');
-        return;
-      }
-      await createTicket({ preClassification: data.classification });
-    } catch (err) { setError(err.message); setPhase('idle'); }
-  };
-
-  const createTicket = async ({
-    forceCreate = false, duplicateOfId = null,
-    similarityScore = null, preClassification = null,
-  } = {}) => {
-    setPhase('creating');
-    setError('');
-    try {
-      const res  = await fetch('/api/portal/tickets', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          subject: subject.trim(), description: description.trim(),
-          clientEmail, parentTicketId: parentTicket?.id || null,
-          forceCreate, duplicateOfId, similarityScore, preClassification,
-          attachments: attachments.map(({ fileName, mimeType, dataUrl, sizeBytes }) =>
-            ({ fileName, mimeType, dataUrl, sizeBytes })),
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Submission failed');
-      onSuccess(data.ticket, data.emailStatus);
-    } catch (err) { setError(err.message); setPhase('idle'); }
-  };
-
-  return (
-    <form onSubmit={handleSubmit} noValidate>
-      {error && (
-        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 flex items-start gap-2">
-          <svg className="w-4 h-4 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd"/>
-          </svg>
-          {error}
-        </div>
-      )}
-
-      {phase === 'duplicate' && dupInfo && (
-        <div className="mb-4 p-4 bg-orange-50 border border-orange-200 rounded-lg text-sm">
-          <p className="font-semibold text-orange-900 mb-1">
-            ⚠ Similar ticket already exists ({dupInfo.score}% match)
-          </p>
-          <p className="text-orange-700 font-medium mb-1">{dupInfo.existingTicket.subject}</p>
-          <p className="text-orange-600 text-xs mb-3">Status: {dupInfo.existingTicket.status}</p>
-          <div className="flex gap-2">
-            <button type="button" onClick={() => setPhase('idle')} className="btn-secondary text-xs px-3 py-1.5">Go Back</button>
-            <button type="button" disabled={isLoading}
-              onClick={() => createTicket({ forceCreate: true, duplicateOfId: dupInfo.existingTicket.id, similarityScore: dupInfo.score, preClassification: preClass })}
-              className="btn-primary text-xs px-3 py-1.5">
-              {isLoading ? <LoadingSpinner size="sm" /> : 'Submit Anyway'}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {phase !== 'duplicate' && (
-        <>
-          <div className="mb-4">
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Subject <span className="text-red-500">*</span>
-            </label>
-            <input type="text" value={subject} onChange={(e) => setSubject(e.target.value)}
-              maxLength={MAX_SUBJECT} placeholder="Brief summary of your issue"
-              className="input-field" required disabled={isLoading} />
-            <p className="text-xs text-gray-400 mt-1 text-right">{subject.length}/{MAX_SUBJECT}</p>
-          </div>
-
-          <div className="mb-4">
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Description <span className="text-red-500">*</span>
-            </label>
-            <textarea value={description} onChange={(e) => setDescription(e.target.value)}
-              maxLength={MAX_DESCRIPTION} rows={5}
-              placeholder="Describe your issue in detail — include any error messages, steps to reproduce, etc."
-              className="input-field resize-none" required disabled={isLoading} />
-            <p className="text-xs text-gray-400 mt-1 text-right">{description.length}/{MAX_DESCRIPTION}</p>
-          </div>
-
-          <div className="mb-5">
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Screenshots / Images
-            </label>
-            {attachments.length < MAX_FILES && (
-              <div onClick={() => fileRef.current?.click()}
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={(e) => { e.preventDefault(); handleFiles(e.dataTransfer.files); }}
-                className="border-2 border-dashed border-gray-200 rounded-lg p-5 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-colors">
-                <svg className="w-7 h-7 text-gray-300 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                    d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
-                </svg>
-                <p className="text-sm text-gray-500">Click or drag images here</p>
-                <p className="text-xs text-gray-400 mt-0.5">JPEG, PNG, GIF, WebP</p>
-                <input ref={fileRef} type="file" accept="image/*" multiple className="hidden"
-                  onChange={(e) => handleFiles(e.target.files)} />
-              </div>
-            )}
-            {attachments.length > 0 && (
-              <div className="flex flex-wrap gap-3 mt-3">
-                {attachments.map((att, idx) => (
-                  <div key={idx} className="relative group">
-                    <img src={att.dataUrl} alt={att.fileName} className="w-20 h-20 object-cover rounded-lg border border-gray-200" />
-                    <button type="button" onClick={() => setAttachments((p) => p.filter((_, i) => i !== idx))}
-                      className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 text-white rounded-full text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">✕</button>
-                    <p className="text-xs text-gray-400 mt-1 max-w-[80px] truncate">{att.fileName}</p>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="flex gap-3">
-            <button type="submit" disabled={isLoading || !subject.trim() || !description.trim()} className="btn-primary flex-1">
-              {phase === 'checking' ? <><LoadingSpinner size="sm" /> Checking…</> :
-               phase === 'creating' ? <><LoadingSpinner size="sm" /> Submitting…</> :
-               parentTicket ? '↩ Submit Follow-up' : 'Submit Ticket'}
-            </button>
-            {onCancel && <button type="button" onClick={onCancel} className="btn-secondary">Cancel</button>}
-          </div>
-        </>
-      )}
-    </form>
-  );
-}
-
-// ─── Ticket card ──────────────────────────────────────────────────────────────
-function TicketCard({ ticket, clientEmail }) {
-  const [expanded,     setExpanded]   = useState(false);
-  const [activeAction, setActiveAction] = useState(null); // 'follow-up' | 'provide-details' | null
-  const [messageText,  setMessageText] = useState('');
-  const [attachments,  setAttachments] = useState([]);
-  const [submitting,   setSubmitting]  = useState(false);
-  const [msg,          setMsg]         = useState('');
-  const [lightbox,     setLightbox]    = useState(null);
-  const fileRef = useRef(null);
-
-  const handleFiles = async (files) => {
-    const incoming = Array.from(files);
-    const processed = [];
-    for (const file of incoming) {
-      if (!ACCEPTED_TYPES.includes(file.type)) continue;
-      if (file.size > MAX_FILE_MB * 1024 * 1024) continue;
-      processed.push({ fileName: file.name, mimeType: file.type, dataUrl: await fileToDataUrl(file), sizeBytes: file.size });
-    }
-    setAttachments(p => [...p, ...processed].slice(0, MAX_FILES));
-  };
-
-  const handleAction = async (endpoint, successText) => {
-    if (!messageText.trim()) return;
-    setSubmitting(true);
-    setMsg('');
-    try {
-      const res  = await fetch(`/api/portal/tickets/${ticket.id}/${endpoint}`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          clientEmail,
-          message:     messageText.trim(),
-          details:     messageText.trim(),
-          attachments: attachments.map(({ fileName, mimeType, dataUrl, sizeBytes }) => ({ fileName, mimeType, dataUrl, sizeBytes })),
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to submit');
-      setMsg(`✓ ${successText}`);
-      setMessageText('');
-      setAttachments([]);
-      setTimeout(() => { setMsg(''); setActiveAction(null); }, 2500);
-    } catch (e) {
-      setMsg(`Error: ${e.message}`);
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const closeAction = () => { setActiveAction(null); setMessageText(''); setAttachments([]); setMsg(''); };
-
-  return (
-    <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-      <div className="p-5">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap mb-1">
-              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[ticket.status] || 'bg-gray-100 text-gray-600'}`}>
-                {ticket.status}
-              </span>
-              {ticket.priority && (
-                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${PRIORITY_COLORS[ticket.priority] || 'bg-gray-100 text-gray-600'}`}>
-                  {ticket.priority}
-                </span>
-              )}
-              {ticket.category && <span className="text-xs text-gray-400">{ticket.category}</span>}
-            </div>
-            <h3 className="font-semibold text-gray-900 text-sm leading-snug">{ticket.subject}</h3>
-            <p className="text-xs text-gray-400 mt-1">
-              <span className="font-mono font-semibold text-gray-500">#{String(ticket.ticketNumber ?? '').padStart(3, '0')}</span>
-              {' · '}Submitted {formatDate(ticket.createdAt)}
-            </p>
-          </div>
-          <button onClick={() => setExpanded((p) => !p)}
-            className="text-gray-400 hover:text-gray-600 transition-colors flex-shrink-0 mt-0.5"
-            aria-label={expanded ? 'Collapse' : 'Expand'}>
-            <svg className={`w-5 h-5 transition-transform ${expanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7"/>
-            </svg>
-          </button>
-        </div>
-      </div>
-
-      {expanded && (
-        <div className="border-t border-gray-100 px-5 pb-5 pt-4 space-y-4">
-          <div>
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Description</p>
-            <p className="text-sm text-gray-700 whitespace-pre-wrap">{ticket.description}</p>
-          </div>
-
-          {ticket.draftResponse && (
-            <div className="bg-blue-50 border border-blue-100 rounded-lg p-4">
-              <p className="text-xs font-medium text-blue-700 uppercase tracking-wide mb-1.5">✨ AI Suggested Response</p>
-              <p className="text-sm text-blue-800 whitespace-pre-wrap">{ticket.draftResponse}</p>
-            </div>
-          )}
-
-          {/* Conversation thread — team messages + client follow-ups */}
-          {ticket.activities?.length > 0 && (
-            <div className="space-y-2">
-              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Conversation</p>
-              {ticket.activities.map(act => {
-                const isClientMessage = act.action === 'details_provided' || act.action === 'follow_up_added';
-                return (
-                  <div key={act.id} className={`rounded-lg p-3.5 ${isClientMessage
-                    ? 'bg-blue-50 border border-blue-200 ml-4'
-                    : 'bg-amber-50 border border-amber-200 mr-4'}`}>
-                    <div className="flex items-center justify-between gap-2 mb-1.5">
-                      <div className="flex items-center gap-1.5">
-                        <span className={`inline-flex items-center justify-center w-5 h-5 rounded-full text-xs font-bold ${
-                          isClientMessage ? 'bg-blue-200 text-blue-800' : 'bg-amber-200 text-amber-800'
-                        }`}>
-                          {isClientMessage ? 'Y' : (act.userName ? act.userName.charAt(0).toUpperCase() : '?')}
-                        </span>
-                        <span className={`text-xs font-semibold ${isClientMessage ? 'text-blue-800' : 'text-amber-800'}`}>
-                          {isClientMessage
-                            ? 'You'
-                            : `${act.userName || 'Support'}${act.userTeam ? ` · ${act.userTeam}` : ''}`
-                          }
-                        </span>
-                        <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
-                          act.action === 'details_requested' ? 'bg-amber-100 text-amber-700' :
-                          act.action === 'follow_up_added'   ? 'bg-blue-100 text-blue-700' :
-                                                               'bg-green-100 text-green-700'
-                        }`}>
-                          {act.action === 'details_requested' ? 'Requesting details' :
-                           act.action === 'follow_up_added'   ? 'Follow-up' :
-                                                                'Additional details'}
-                        </span>
-                      </div>
-                      <time className={`text-xs flex-shrink-0 ${isClientMessage ? 'text-blue-500' : 'text-amber-600'}`}>
-                        {new Date(act.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                      </time>
-                    </div>
-                    <p className={`text-sm leading-snug whitespace-pre-wrap ${isClientMessage ? 'text-blue-900' : 'text-amber-900'}`}>
-                      {act.newValue}
-                    </p>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {ticket.attachments?.length > 0 && (
-            <div>
-              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Attachments</p>
-              <div className="flex flex-wrap gap-2">
-                {ticket.attachments.map((att) => (
-                  att.dataUrl && att.mimeType?.startsWith('image/') ? (
-                    <button key={att.id} type="button" onClick={() => setLightbox(att)}
-                      className="relative group focus:outline-none">
-                      <img src={att.dataUrl} alt={att.fileName}
-                        className="w-20 h-20 object-cover rounded-lg border border-gray-200 hover:border-blue-400 transition-colors cursor-zoom-in shadow-sm" />
-                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 rounded-lg transition-colors flex items-center justify-center">
-                        <svg className="w-5 h-5 text-white opacity-0 group-hover:opacity-100 transition-opacity drop-shadow" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7"/>
-                        </svg>
-                      </div>
-                      <p className="text-xs text-gray-400 mt-1 max-w-[80px] truncate text-left">{att.fileName}</p>
-                    </button>
-                  ) : (
-                    <div key={att.id} className="flex items-center gap-1.5 px-2.5 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-xs text-gray-600">
-                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/>
-                      </svg>
-                      {att.fileName}
-                    </div>
-                  )
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Lightbox */}
-          {lightbox && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 px-4"
-              onClick={() => setLightbox(null)}>
-              <div className="relative max-w-3xl w-full flex flex-col items-center"
-                onClick={e => e.stopPropagation()}>
-                <div className="w-full flex items-center justify-between mb-3 px-1">
-                  <p className="text-sm text-white/80 truncate max-w-[80%]">{lightbox.fileName}</p>
-                  <div className="flex items-center gap-2">
-                    <button onClick={() => { const a = document.createElement('a'); a.href = lightbox.dataUrl; a.download = lightbox.fileName; a.click(); }}
-                      className="text-xs text-white/70 hover:text-white bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5">
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
-                      </svg>
-                      Download
-                    </button>
-                    <button onClick={() => setLightbox(null)}
-                      className="w-8 h-8 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/30 text-white transition-colors">
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/>
-                      </svg>
-                    </button>
-                  </div>
-                </div>
-                <img src={lightbox.dataUrl} alt={lightbox.fileName}
-                  className="max-h-[80vh] max-w-full rounded-xl shadow-2xl object-contain" />
-                <p className="text-white/30 text-xs mt-3">Click outside to close</p>
-              </div>
-            </div>
-          )}
-
-          {ticket.status !== 'Resolved' && (
-            <div className="border-t border-gray-100 pt-4">
-              {activeAction ? (
-                <div>
-                  <p className="text-sm font-semibold text-gray-700 mb-2">
-                    {activeAction === 'follow-up' ? 'Add a Follow-up' : 'Provide Additional Details'}
-                  </p>
-                  {msg && (
-                    <p className={`text-sm mb-2 ${msg.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>{msg}</p>
-                  )}
-                  <textarea value={messageText} onChange={(e) => setMessageText(e.target.value)}
-                    rows={4}
-                    placeholder={activeAction === 'follow-up'
-                      ? 'Add more context or an update to this ticket…'
-                      : 'Share the additional details our team requested…'}
-                    className="input-field resize-none text-sm mb-3" disabled={submitting} />
-
-                  {/* Image attachments */}
-                  <div className="mb-3">
-                    <div
-                      onClick={() => fileRef.current?.click()}
-                      onDragOver={e => e.preventDefault()}
-                      onDrop={e => { e.preventDefault(); handleFiles(e.dataTransfer.files); }}
-                      className="border-2 border-dashed border-gray-200 rounded-lg p-3 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-colors">
-                      <p className="text-xs text-gray-400">Click or drag images here (optional)</p>
-                      <input ref={fileRef} type="file" accept="image/*" multiple className="hidden"
-                        onChange={e => handleFiles(e.target.files)} />
-                    </div>
-                    {attachments.length > 0 && (
-                      <div className="flex flex-wrap gap-2 mt-2">
-                        {attachments.map((att, idx) => (
-                          <div key={idx} className="relative group">
-                            <img src={att.dataUrl} alt={att.fileName} className="w-16 h-16 object-cover rounded-lg border border-gray-200" />
-                            <button type="button"
-                              onClick={() => setAttachments(p => p.filter((_, i) => i !== idx))}
-                              className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white rounded-full text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">✕</button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => handleAction(activeAction, activeAction === 'follow-up' ? 'Follow-up added.' : 'Details submitted.')}
-                      disabled={submitting || !messageText.trim()}
-                      className="btn-primary text-sm">
-                      {submitting ? <><LoadingSpinner size="sm" /> Submitting…</> : 'Submit'}
-                    </button>
-                    <button onClick={closeAction} className="btn-secondary text-sm">Cancel</button>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex flex-wrap gap-3">
-                  <button onClick={() => setActiveAction('follow-up')}
-                    className="text-sm text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/>
-                    </svg>
-                    Add follow-up
-                  </button>
-                  <button onClick={() => setActiveAction('provide-details')}
-                    className="text-sm text-amber-600 hover:text-amber-700 font-medium flex items-center gap-1">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
-                    </svg>
-                    Provide details
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── Main dashboard ───────────────────────────────────────────────────────────
-export default function PortalDashboard() {
-  const { data: session, status } = useSession();
-  const router = useRouter();
-
-  // client_token user (email/password login)
-  const [clientUser,   setClientUser]   = useState(null);
-  const [authChecked,  setAuthChecked]  = useState(false);
-
-  const [tickets,      setTickets]      = useState([]);
-  const [loading,      setLoading]      = useState(true);
-  const [error,        setError]        = useState('');
-  const [showForm,     setShowForm]     = useState(false);
-  const [statusFilter, setStatusFilter] = useState('All');
-  const [emailToast,   setEmailToast]   = useState(null);
-
-  // Check client_token cookie (email/password users)
-  useEffect(() => {
-    fetch('/api/portal/client-auth/me')
-      .then(r => r.ok ? r.json() : null)
-      .then(data => { if (data?.client) setClientUser(data.client); })
-      .catch(() => {})
-      .finally(() => setAuthChecked(true));
-  }, []);
-
-  // Redirect if neither auth method is active
-  useEffect(() => {
-    if (!authChecked) return;
-    if (status === 'loading') return;
-    if (!clientUser && status === 'unauthenticated') {
-      router.replace('/portal/login');
-    }
-  }, [authChecked, status, clientUser, router]);
-
-  // Determine the active user from whichever auth method succeeded
-  const isGoogleUser  = status === 'authenticated';
-  const activeUser    = isGoogleUser
-    ? { name: session.user.name, email: session.user.email, image: session.user.image }
-    : clientUser
-      ? { name: clientUser.name, email: clientUser.email, image: null }
-      : null;
-
-  const isReady = authChecked && (isGoogleUser || !!clientUser);
-
-  const fetchTickets = useCallback(async () => {
-    if (!isReady) return;
-    setLoading(true);
-    setError('');
-    try {
-      const res  = await fetch('/api/portal/tickets/my');
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to load tickets');
-      setTickets(data.tickets || []);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  }, [isReady]);
-
-  useEffect(() => { fetchTickets(); }, [fetchTickets]);
-
-  const handleNewTicket = (ticket, emailStatus) => {
-    setTickets((prev) => [ticket, ...prev]);
-    setShowForm(false);
-    if (emailStatus) {
-      setEmailToast({ sent: emailStatus.clientEmailSent });
-      setTimeout(() => setEmailToast(null), 5000);
-    }
-  };
-
-  const handleSignOut = async () => {
-    if (isGoogleUser) {
-      signOut({ callbackUrl: '/portal/login' });
-    } else {
-      await fetch('/api/portal/client-auth/logout', { method: 'POST' });
-      router.push('/portal/login');
-    }
-  };
-
-  const filtered = statusFilter === 'All'
-    ? tickets
-    : tickets.filter((t) => t.status === statusFilter);
-
-  const counts = {
-    All:           tickets.length,
-    Open:          tickets.filter((t) => t.status === 'Open').length,
-    'In Progress': tickets.filter((t) => t.status === 'In Progress').length,
-    Resolved:      tickets.filter((t) => t.status === 'Resolved').length,
-  };
-
-  // Show spinner while checking auth
-  if (!authChecked || status === 'loading' || (!activeUser && authChecked)) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <LoadingSpinner size="lg" />
-      </div>
-    );
-  }
-
-  if (!activeUser) return null;
-
-  return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Navbar */}
-      <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
-        <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between gap-4">
-          <Link href="/" className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
-              <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                  d="M18.364 5.636l-3.536 3.536m0 5.656l3.536 3.536M9.172 9.172L5.636 5.636m3.536 9.192l-3.536 3.536M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-5 0a4 4 0 11-8 0 4 4 0 018 0z"/>
-              </svg>
-            </div>
-            <span className="font-bold text-gray-900 text-sm">HelpDesk</span>
-          </Link>
-
-          <div className="flex items-center gap-3">
-            {activeUser.image
-              ? <img src={activeUser.image} alt={activeUser.name} className="w-8 h-8 rounded-full border border-gray-200" referrerPolicy="no-referrer" />
-              : <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-sm font-bold flex-shrink-0">
-                  {activeUser.name?.charAt(0).toUpperCase()}
-                </div>
-            }
-            <div className="hidden sm:block text-right">
-              <p className="text-sm font-medium text-gray-900 leading-tight">{activeUser.name}</p>
-              <p className="text-xs text-gray-400 leading-tight">{activeUser.email}</p>
-            </div>
-            <button onClick={handleSignOut}
-              className="text-sm text-gray-500 hover:text-red-600 transition-colors px-2 py-1 rounded-lg hover:bg-red-50 font-medium">
-              Sign out
-            </button>
-          </div>
-        </div>
-      </header>
-
-      <main className="max-w-4xl mx-auto px-4 py-8">
-        {/* Email notification toast */}
-        {emailToast !== null && (
-          <div className={`fixed top-4 right-4 z-50 flex items-start gap-3 px-4 py-3 rounded-xl shadow-lg border text-sm max-w-sm transition-all
-            ${emailToast.sent
-              ? 'bg-green-50 border-green-200 text-green-800'
-              : 'bg-amber-50 border-amber-200 text-amber-800'}`}>
-            <span className="text-lg leading-none mt-0.5">
-              {emailToast.sent ? '✉️' : '⚠️'}
-            </span>
-            <div className="flex-1">
-              <p className="font-semibold leading-snug">
-                {emailToast.sent ? 'Confirmation email sent' : 'Email not sent'}
-              </p>
-              <p className="text-xs mt-0.5 opacity-80">
-                {emailToast.sent
-                  ? `A confirmation was sent to ${activeUser.email}`
-                  : 'Your ticket was created, but the confirmation email could not be delivered. Check your spam folder or contact support.'}
-              </p>
-            </div>
-            <button onClick={() => setEmailToast(null)}
-              className="text-current opacity-50 hover:opacity-100 transition-opacity ml-1 mt-0.5"
-              aria-label="Dismiss">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/>
-              </svg>
-            </button>
-          </div>
-        )}
-        <div className="flex items-center justify-between mb-6 gap-4 flex-wrap">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">My Tickets</h1>
-            <p className="text-sm text-gray-500 mt-0.5">All support requests tied to your account</p>
-          </div>
-          <button onClick={() => setShowForm((p) => !p)}
-            className="btn-primary flex items-center gap-2">
-            {showForm ? (
-              <>
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/>
-                </svg>
-                Cancel
-              </>
-            ) : (
-              <>
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4"/>
-                </svg>
-                New Ticket
-              </>
-            )}
-          </button>
-        </div>
-
-        {/* New ticket form */}
-        {showForm && (
-          <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-6 mb-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">Submit a New Ticket</h2>
-            <TicketForm
-              clientEmail={activeUser.email}
-              onSuccess={handleNewTicket}
-              onCancel={() => setShowForm(false)}
-            />
-          </div>
-        )}
-
-        {/* Stats strip */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-          {Object.entries(counts).map(([label, count]) => (
-            <button key={label} onClick={() => setStatusFilter(label)}
-              className={`p-3 rounded-xl border text-left transition-colors ${
-                statusFilter === label
-                  ? 'bg-blue-50 border-blue-200'
-                  : 'bg-white border-gray-200 hover:bg-gray-50'
-              }`}>
-              <p className={`text-2xl font-bold ${statusFilter === label ? 'text-blue-700' : 'text-gray-900'}`}>{count}</p>
-              <p className={`text-xs mt-0.5 ${statusFilter === label ? 'text-blue-600' : 'text-gray-500'}`}>{label}</p>
-            </button>
-          ))}
-        </div>
-
-        {/* Ticket list */}
-        {loading ? (
-          <div className="flex items-center justify-center py-20">
-            <LoadingSpinner size="lg" />
-          </div>
-        ) : error ? (
-          <div className="bg-red-50 border border-red-200 rounded-xl p-6 text-center">
-            <p className="text-red-700 font-medium">{error}</p>
-            <button onClick={fetchTickets} className="mt-3 text-sm text-red-600 hover:text-red-700 underline">Try again</button>
-          </div>
-        ) : filtered.length === 0 ? (
-          <div className="bg-white border border-gray-200 rounded-xl p-12 text-center">
-            <svg className="w-12 h-12 text-gray-200 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-            </svg>
-            {statusFilter === 'All' ? (
-              <>
-                <p className="text-gray-500 font-medium">No tickets yet</p>
-                <p className="text-gray-400 text-sm mt-1">Click "New Ticket" above to get support.</p>
-              </>
-            ) : (
-              <p className="text-gray-500 font-medium">No {statusFilter.toLowerCase()} tickets</p>
-            )}
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {filtered.map((ticket) => (
-              <TicketCard
-                key={ticket.id}
-                ticket={ticket}
-                clientEmail={activeUser.email}
-              />
-            ))}
-          </div>
-        )}
-      </main>
-    </div>
-  );
-}
-</file>
-
 <file path="app/portal/tickets/page.jsx">
 'use client';
 
@@ -7622,18 +6869,22 @@ function TicketCard({ ticket, clientEmail, onFollowUpSuccess }) {
             <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Description</p>
             <p className="text-sm text-gray-700 whitespace-pre-wrap">{ticket.description}</p>
           </div>
-          {ticket.draftResponse && (
-            <div className="bg-blue-50 border border-blue-100 rounded-lg p-4">
-              <p className="text-xs font-medium text-blue-700 uppercase tracking-wide mb-1.5">✨ AI Suggested Response</p>
-              <p className="text-sm text-blue-800 whitespace-pre-wrap">{ticket.draftResponse}</p>
-            </div>
-          )}
 
-          {/* Conversation thread — team messages + client follow-ups */}
-          {ticket.activities?.length > 0 && (
+          {/* Conversation — AI response first, then team/client messages */}
+          {(ticket.draftResponse || ticket.activities?.length > 0) && (
             <div className="space-y-2">
               <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Conversation</p>
-              {ticket.activities.map(act => {
+              {ticket.draftResponse && (
+                <div className="rounded-lg p-3.5 bg-indigo-50 border border-indigo-200 mr-4">
+                  <div className="flex items-center gap-1.5 mb-1.5">
+                    <span className="inline-flex items-center justify-center w-5 h-5 rounded-full text-xs bg-indigo-200 text-indigo-800">✨</span>
+                    <span className="text-xs font-semibold text-indigo-800">Support Team</span>
+                    <span className="text-xs px-1.5 py-0.5 rounded-full font-medium bg-indigo-100 text-indigo-700">AI Response</span>
+                  </div>
+                  <p className="text-sm leading-snug whitespace-pre-wrap text-indigo-900">{ticket.draftResponse}</p>
+                </div>
+              )}
+              {ticket.activities?.map(act => {
                 const isClientMessage = act.action === 'details_provided' || act.action === 'follow_up_added';
                 return (
                   <div key={act.id} className={`rounded-lg p-3.5 ${isClientMessage
@@ -7647,19 +6898,14 @@ function TicketCard({ ticket, clientEmail, onFollowUpSuccess }) {
                           {isClientMessage ? 'Y' : (act.userName ? act.userName.charAt(0).toUpperCase() : '?')}
                         </span>
                         <span className={`text-xs font-semibold ${isClientMessage ? 'text-blue-800' : 'text-amber-800'}`}>
-                          {isClientMessage
-                            ? 'You'
-                            : `${act.userName || 'Support'}${act.userTeam ? ` · ${act.userTeam}` : ''}`
-                          }
+                          {isClientMessage ? 'You' : `${act.userName || 'Support'}${act.userTeam ? ` · ${act.userTeam}` : ''}`}
                         </span>
                         <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
                           act.action === 'details_requested' ? 'bg-amber-100 text-amber-700' :
-                          act.action === 'follow_up_added'   ? 'bg-blue-100 text-blue-700' :
-                                                               'bg-green-100 text-green-700'
+                          act.action === 'follow_up_added'   ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'
                         }`}>
                           {act.action === 'details_requested' ? 'Requesting details' :
-                           act.action === 'follow_up_added'   ? 'Follow-up' :
-                                                                'Additional details'}
+                           act.action === 'follow_up_added' ? 'Follow-up' : 'Additional details'}
                         </span>
                       </div>
                       <time className={`text-xs flex-shrink-0 ${isClientMessage ? 'text-blue-500' : 'text-amber-600'}`}>
@@ -8551,17 +7797,27 @@ export default function TicketTable({
 
                   {/* Status dropdown */}
                   <td className="py-3 pr-4">
-                    {updatingId === ticket.id && updatingField === 'status' ? <LoadingSpinner size="sm" /> : (
-                      <select
-                        value={ticket.status}
-                        onChange={(e) => handleStatusChange(ticket.id, e.target.value, e)}
-                        className="text-xs border border-gray-200 rounded-md px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400 cursor-pointer"
-                        aria-label={`Status for ${ticket.subject}`}
-                        disabled={updatingId === ticket.id || ticket.status === 'Signed Off' && !isAdmin}
-                      >
-                        {(isAdmin ? STATUS_OPTIONS_ADMIN : STATUS_OPTIONS).map((s) => <option key={s} value={s}>{s}</option>)}
-                      </select>
-                    )}
+                    {updatingId === ticket.id && updatingField === 'status' ? <LoadingSpinner size="sm" /> : (() => {
+                      const isAssigned = ticket.assignees?.some(a => a.id === userRole ? false : true);
+                      const teamMemberCanChange = userRole !== 'TeamMember' || ticket.assignees?.some(a => a.userId !== undefined);
+                      // Build available options: admin sees Signed Off only when ticket is Resolved
+                      const availableStatuses = isAdmin
+                        ? (ticket.status === 'Resolved'
+                            ? STATUS_OPTIONS_ADMIN
+                            : STATUS_OPTIONS_ADMIN.filter(s => s !== 'Signed Off'))
+                        : STATUS_OPTIONS;
+                      return (
+                        <select
+                          value={ticket.status}
+                          onChange={(e) => handleStatusChange(ticket.id, e.target.value, e)}
+                          className="text-xs border border-gray-200 rounded-md px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400 cursor-pointer"
+                          aria-label={`Status for ${ticket.subject}`}
+                          disabled={updatingId === ticket.id || (ticket.status === 'Signed Off' && !isAdmin)}
+                        >
+                          {availableStatuses.map((s) => <option key={s} value={s}>{s}</option>)}
+                        </select>
+                      );
+                    })()}
                   </td>
 
                   {/* Multi-team reassign — Admin only */}
@@ -8723,6 +7979,778 @@ export default function TicketTable({
         </div>
       )}
     </>
+  );
+}
+</file>
+
+<file path="app/portal/dashboard/page.jsx">
+'use client';
+
+/**
+ * Client Portal Dashboard — /portal/dashboard
+ * Google-authenticated clients see all tickets tied to their account.
+ * Fetches by clientUserId (Google session) and also by email for legacy tickets.
+ */
+
+import { useState, useEffect, useCallback, useRef } from 'react';import { useSession, signOut } from 'next-auth/react';
+import { useRouter }           from 'next/navigation';
+import Link                    from 'next/link';
+import LoadingSpinner          from '../../components/LoadingSpinner';
+
+const MAX_SUBJECT     = 150;
+const MAX_DESCRIPTION = 2000;
+const MAX_FILE_MB     = 5;
+const MAX_FILES       = 25;
+const ACCEPTED_TYPES  = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+
+const STATUS_COLORS = {
+  'Open':        'bg-blue-100 text-blue-700',
+  'In Progress': 'bg-yellow-100 text-yellow-700',
+  'Resolved':    'bg-green-100 text-green-700',
+  'Signed Off':  'bg-purple-100 text-purple-700',
+};
+
+const PRIORITY_COLORS = {
+  'Low':      'bg-gray-100 text-gray-600',
+  'Medium':   'bg-blue-50 text-blue-600',
+  'High':     'bg-orange-100 text-orange-700',
+  'Critical': 'bg-red-100 text-red-700',
+};
+
+function formatDate(d) {
+  return new Date(d).toLocaleDateString('en-US', {
+    month: 'short', day: 'numeric', year: 'numeric',
+  });
+}
+
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload  = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+// ─── Ticket submission form ───────────────────────────────────────────────────
+function TicketForm({ clientEmail, onSuccess, parentTicket = null, onCancel }) {
+  const [subject,     setSubject]     = useState(parentTicket ? `Re: ${parentTicket.subject}` : '');
+  const [description, setDescription] = useState('');
+  const [attachments, setAttachments] = useState([]);
+  const [phase,       setPhase]       = useState('idle');
+  const [error,       setError]       = useState('');
+  const [dupInfo,     setDupInfo]     = useState(null);
+  const [preClass,    setPreClass]    = useState(null);
+  const fileRef = useRef(null);
+  const isLoading = phase === 'checking' || phase === 'creating';
+
+  const handleFiles = async (files) => {
+    setError('');
+    const incoming = Array.from(files);
+    if (attachments.length + incoming.length > MAX_FILES) {
+      setError(`Maximum ${MAX_FILES} images allowed.`); return;
+    }
+    const processed = [];
+    for (const file of incoming) {
+      if (!ACCEPTED_TYPES.includes(file.type)) {
+        setError(`"${file.name}" must be JPEG, PNG, GIF or WebP.`); return;
+      }
+      if (file.size > MAX_FILE_MB * 1024 * 1024) {
+        setError(`"${file.name}" exceeds ${MAX_FILE_MB} MB.`); return;
+      }
+      const dataUrl = await fileToDataUrl(file);
+      processed.push({ fileName: file.name, mimeType: file.type, dataUrl, sizeBytes: file.size });
+    }
+    setAttachments((p) => [...p, ...processed]);
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+    if (parentTicket) { await createTicket({}); return; }
+    setPhase('checking');
+    try {
+      const res  = await fetch('/api/portal/tickets/check-duplicate', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subject: subject.trim(), description: description.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Check failed');
+      if (data.isDuplicate && data.existingTicket) {
+        setDupInfo({ existingTicket: data.existingTicket, score: data.score });
+        setPreClass(data.classification);
+        setPhase('duplicate');
+        return;
+      }
+      await createTicket({ preClassification: data.classification });
+    } catch (err) { setError(err.message); setPhase('idle'); }
+  };
+
+  const createTicket = async ({
+    forceCreate = false, duplicateOfId = null,
+    similarityScore = null, preClassification = null,
+  } = {}) => {
+    setPhase('creating');
+    setError('');
+    try {
+      const res  = await fetch('/api/portal/tickets', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          subject: subject.trim(), description: description.trim(),
+          clientEmail, parentTicketId: parentTicket?.id || null,
+          forceCreate, duplicateOfId, similarityScore, preClassification,
+          attachments: attachments.map(({ fileName, mimeType, dataUrl, sizeBytes }) =>
+            ({ fileName, mimeType, dataUrl, sizeBytes })),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Submission failed');
+      onSuccess(data.ticket, data.emailStatus);
+    } catch (err) { setError(err.message); setPhase('idle'); }
+  };
+
+  return (
+    <form onSubmit={handleSubmit} noValidate>
+      {error && (
+        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 flex items-start gap-2">
+          <svg className="w-4 h-4 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd"/>
+          </svg>
+          {error}
+        </div>
+      )}
+
+      {phase === 'duplicate' && dupInfo && (
+        <div className="mb-4 p-4 bg-orange-50 border border-orange-200 rounded-lg text-sm">
+          <p className="font-semibold text-orange-900 mb-1">
+            ⚠ Similar ticket already exists ({dupInfo.score}% match)
+          </p>
+          <p className="text-orange-700 font-medium mb-1">{dupInfo.existingTicket.subject}</p>
+          <p className="text-orange-600 text-xs mb-3">Status: {dupInfo.existingTicket.status}</p>
+          <div className="flex gap-2">
+            <button type="button" onClick={() => setPhase('idle')} className="btn-secondary text-xs px-3 py-1.5">Go Back</button>
+            <button type="button" disabled={isLoading}
+              onClick={() => createTicket({ forceCreate: true, duplicateOfId: dupInfo.existingTicket.id, similarityScore: dupInfo.score, preClassification: preClass })}
+              className="btn-primary text-xs px-3 py-1.5">
+              {isLoading ? <LoadingSpinner size="sm" /> : 'Submit Anyway'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {phase !== 'duplicate' && (
+        <>
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Subject <span className="text-red-500">*</span>
+            </label>
+            <input type="text" value={subject} onChange={(e) => setSubject(e.target.value)}
+              maxLength={MAX_SUBJECT} placeholder="Brief summary of your issue"
+              className="input-field" required disabled={isLoading} />
+            <p className="text-xs text-gray-400 mt-1 text-right">{subject.length}/{MAX_SUBJECT}</p>
+          </div>
+
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Description <span className="text-red-500">*</span>
+            </label>
+            <textarea value={description} onChange={(e) => setDescription(e.target.value)}
+              maxLength={MAX_DESCRIPTION} rows={5}
+              placeholder="Describe your issue in detail — include any error messages, steps to reproduce, etc."
+              className="input-field resize-none" required disabled={isLoading} />
+            <p className="text-xs text-gray-400 mt-1 text-right">{description.length}/{MAX_DESCRIPTION}</p>
+          </div>
+
+          <div className="mb-5">
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Screenshots / Images
+            </label>
+            {attachments.length < MAX_FILES && (
+              <div onClick={() => fileRef.current?.click()}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => { e.preventDefault(); handleFiles(e.dataTransfer.files); }}
+                className="border-2 border-dashed border-gray-200 rounded-lg p-5 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-colors">
+                <svg className="w-7 h-7 text-gray-300 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                    d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                </svg>
+                <p className="text-sm text-gray-500">Click or drag images here</p>
+                <p className="text-xs text-gray-400 mt-0.5">JPEG, PNG, GIF, WebP</p>
+                <input ref={fileRef} type="file" accept="image/*" multiple className="hidden"
+                  onChange={(e) => handleFiles(e.target.files)} />
+              </div>
+            )}
+            {attachments.length > 0 && (
+              <div className="flex flex-wrap gap-3 mt-3">
+                {attachments.map((att, idx) => (
+                  <div key={idx} className="relative group">
+                    <img src={att.dataUrl} alt={att.fileName} className="w-20 h-20 object-cover rounded-lg border border-gray-200" />
+                    <button type="button" onClick={() => setAttachments((p) => p.filter((_, i) => i !== idx))}
+                      className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 text-white rounded-full text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">✕</button>
+                    <p className="text-xs text-gray-400 mt-1 max-w-[80px] truncate">{att.fileName}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="flex gap-3">
+            <button type="submit" disabled={isLoading || !subject.trim() || !description.trim()} className="btn-primary flex-1">
+              {phase === 'checking' ? <><LoadingSpinner size="sm" /> Checking…</> :
+               phase === 'creating' ? <><LoadingSpinner size="sm" /> Submitting…</> :
+               parentTicket ? '↩ Submit Follow-up' : 'Submit Ticket'}
+            </button>
+            {onCancel && <button type="button" onClick={onCancel} className="btn-secondary">Cancel</button>}
+          </div>
+        </>
+      )}
+    </form>
+  );
+}
+
+// ─── Ticket card ──────────────────────────────────────────────────────────────
+function TicketCard({ ticket, clientEmail }) {
+  const [expanded,     setExpanded]   = useState(false);
+  const [activeAction, setActiveAction] = useState(null); // 'follow-up' | 'provide-details' | null
+  const [messageText,  setMessageText] = useState('');
+  const [attachments,  setAttachments] = useState([]);
+  const [submitting,   setSubmitting]  = useState(false);
+  const [msg,          setMsg]         = useState('');
+  const [lightbox,     setLightbox]    = useState(null);
+  const fileRef = useRef(null);
+
+  const handleFiles = async (files) => {
+    const incoming = Array.from(files);
+    const processed = [];
+    for (const file of incoming) {
+      if (!ACCEPTED_TYPES.includes(file.type)) continue;
+      if (file.size > MAX_FILE_MB * 1024 * 1024) continue;
+      processed.push({ fileName: file.name, mimeType: file.type, dataUrl: await fileToDataUrl(file), sizeBytes: file.size });
+    }
+    setAttachments(p => [...p, ...processed].slice(0, MAX_FILES));
+  };
+
+  const handleAction = async (endpoint, successText) => {
+    if (!messageText.trim()) return;
+    setSubmitting(true);
+    setMsg('');
+    try {
+      const res  = await fetch(`/api/portal/tickets/${ticket.id}/${endpoint}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          clientEmail,
+          message:     messageText.trim(),
+          details:     messageText.trim(),
+          attachments: attachments.map(({ fileName, mimeType, dataUrl, sizeBytes }) => ({ fileName, mimeType, dataUrl, sizeBytes })),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to submit');
+      setMsg(`✓ ${successText}`);
+      setMessageText('');
+      setAttachments([]);
+      setTimeout(() => { setMsg(''); setActiveAction(null); }, 2500);
+    } catch (e) {
+      setMsg(`Error: ${e.message}`);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const closeAction = () => { setActiveAction(null); setMessageText(''); setAttachments([]); setMsg(''); };
+
+  return (
+    <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+      <div className="p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap mb-1">
+              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[ticket.status] || 'bg-gray-100 text-gray-600'}`}>
+                {ticket.status}
+              </span>
+              {ticket.priority && (
+                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${PRIORITY_COLORS[ticket.priority] || 'bg-gray-100 text-gray-600'}`}>
+                  {ticket.priority}
+                </span>
+              )}
+              {ticket.category && <span className="text-xs text-gray-400">{ticket.category}</span>}
+            </div>
+            <h3 className="font-semibold text-gray-900 text-sm leading-snug">{ticket.subject}</h3>
+            <p className="text-xs text-gray-400 mt-1">
+              <span className="font-mono font-semibold text-gray-500">#{String(ticket.ticketNumber ?? '').padStart(3, '0')}</span>
+              {' · '}Submitted {formatDate(ticket.createdAt)}
+            </p>
+          </div>
+          <button onClick={() => setExpanded((p) => !p)}
+            className="text-gray-400 hover:text-gray-600 transition-colors flex-shrink-0 mt-0.5"
+            aria-label={expanded ? 'Collapse' : 'Expand'}>
+            <svg className={`w-5 h-5 transition-transform ${expanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      {expanded && (
+        <div className="border-t border-gray-100 px-5 pb-5 pt-4 space-y-4">
+          <div>
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Description</p>
+            <p className="text-sm text-gray-700 whitespace-pre-wrap">{ticket.description}</p>
+          </div>
+
+          {/* Conversation thread — team messages + AI response + client follow-ups */}
+          {(ticket.draftResponse || ticket.activities?.length > 0) && (
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Conversation</p>
+
+              {/* AI suggested response shown as first message */}
+              {ticket.draftResponse && (
+                <div className="rounded-lg p-3.5 bg-indigo-50 border border-indigo-200 mr-4">
+                  <div className="flex items-center justify-between gap-2 mb-1.5">
+                    <div className="flex items-center gap-1.5">
+                      <span className="inline-flex items-center justify-center w-5 h-5 rounded-full text-xs bg-indigo-200 text-indigo-800">✨</span>
+                      <span className="text-xs font-semibold text-indigo-800">Support Team</span>
+                      <span className="text-xs px-1.5 py-0.5 rounded-full font-medium bg-indigo-100 text-indigo-700">AI Response</span>
+                    </div>
+                  </div>
+                  <p className="text-sm leading-snug whitespace-pre-wrap text-indigo-900">{ticket.draftResponse}</p>
+                </div>
+              )}
+
+              {ticket.activities?.map(act => {
+                const isClientMessage = act.action === 'details_provided' || act.action === 'follow_up_added';
+                return (
+                  <div key={act.id} className={`rounded-lg p-3.5 ${isClientMessage
+                    ? 'bg-blue-50 border border-blue-200 ml-4'
+                    : 'bg-amber-50 border border-amber-200 mr-4'}`}>
+                    <div className="flex items-center justify-between gap-2 mb-1.5">
+                      <div className="flex items-center gap-1.5">
+                        <span className={`inline-flex items-center justify-center w-5 h-5 rounded-full text-xs font-bold ${
+                          isClientMessage ? 'bg-blue-200 text-blue-800' : 'bg-amber-200 text-amber-800'
+                        }`}>
+                          {isClientMessage ? 'Y' : (act.userName ? act.userName.charAt(0).toUpperCase() : '?')}
+                        </span>
+                        <span className={`text-xs font-semibold ${isClientMessage ? 'text-blue-800' : 'text-amber-800'}`}>
+                          {isClientMessage ? 'You' : `${act.userName || 'Support'}${act.userTeam ? ` · ${act.userTeam}` : ''}`}
+                        </span>
+                        <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
+                          act.action === 'details_requested' ? 'bg-amber-100 text-amber-700' :
+                          act.action === 'follow_up_added'   ? 'bg-blue-100 text-blue-700' :
+                                                               'bg-green-100 text-green-700'
+                        }`}>
+                          {act.action === 'details_requested' ? 'Requesting details' :
+                           act.action === 'follow_up_added'   ? 'Follow-up' : 'Additional details'}
+                        </span>
+                      </div>
+                      <time className={`text-xs flex-shrink-0 ${isClientMessage ? 'text-blue-500' : 'text-amber-600'}`}>
+                        {new Date(act.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                      </time>
+                    </div>
+                    <p className={`text-sm leading-snug whitespace-pre-wrap ${isClientMessage ? 'text-blue-900' : 'text-amber-900'}`}>
+                      {act.newValue}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {ticket.attachments?.length > 0 && (
+            <div>
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Attachments</p>
+              <div className="flex flex-wrap gap-2">
+                {ticket.attachments.map((att) => (
+                  att.dataUrl && att.mimeType?.startsWith('image/') ? (
+                    <button key={att.id} type="button" onClick={() => setLightbox(att)}
+                      className="relative group focus:outline-none">
+                      <img src={att.dataUrl} alt={att.fileName}
+                        className="w-20 h-20 object-cover rounded-lg border border-gray-200 hover:border-blue-400 transition-colors cursor-zoom-in shadow-sm" />
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 rounded-lg transition-colors flex items-center justify-center">
+                        <svg className="w-5 h-5 text-white opacity-0 group-hover:opacity-100 transition-opacity drop-shadow" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7"/>
+                        </svg>
+                      </div>
+                      <p className="text-xs text-gray-400 mt-1 max-w-[80px] truncate text-left">{att.fileName}</p>
+                    </button>
+                  ) : (
+                    <div key={att.id} className="flex items-center gap-1.5 px-2.5 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-xs text-gray-600">
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/>
+                      </svg>
+                      {att.fileName}
+                    </div>
+                  )
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Lightbox */}
+          {lightbox && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 px-4"
+              onClick={() => setLightbox(null)}>
+              <div className="relative max-w-3xl w-full flex flex-col items-center"
+                onClick={e => e.stopPropagation()}>
+                <div className="w-full flex items-center justify-between mb-3 px-1">
+                  <p className="text-sm text-white/80 truncate max-w-[80%]">{lightbox.fileName}</p>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => { const a = document.createElement('a'); a.href = lightbox.dataUrl; a.download = lightbox.fileName; a.click(); }}
+                      className="text-xs text-white/70 hover:text-white bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                      </svg>
+                      Download
+                    </button>
+                    <button onClick={() => setLightbox(null)}
+                      className="w-8 h-8 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/30 text-white transition-colors">
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/>
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+                <img src={lightbox.dataUrl} alt={lightbox.fileName}
+                  className="max-h-[80vh] max-w-full rounded-xl shadow-2xl object-contain" />
+                <p className="text-white/30 text-xs mt-3">Click outside to close</p>
+              </div>
+            </div>
+          )}
+
+          {ticket.status !== 'Resolved' && (
+            <div className="border-t border-gray-100 pt-4">
+              {activeAction ? (
+                <div>
+                  <p className="text-sm font-semibold text-gray-700 mb-2">
+                    {activeAction === 'follow-up' ? 'Add a Follow-up' : 'Provide Additional Details'}
+                  </p>
+                  {msg && (
+                    <p className={`text-sm mb-2 ${msg.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>{msg}</p>
+                  )}
+                  <textarea value={messageText} onChange={(e) => setMessageText(e.target.value)}
+                    rows={4}
+                    placeholder={activeAction === 'follow-up'
+                      ? 'Add more context or an update to this ticket…'
+                      : 'Share the additional details our team requested…'}
+                    className="input-field resize-none text-sm mb-3" disabled={submitting} />
+
+                  {/* Image attachments */}
+                  <div className="mb-3">
+                    <div
+                      onClick={() => fileRef.current?.click()}
+                      onDragOver={e => e.preventDefault()}
+                      onDrop={e => { e.preventDefault(); handleFiles(e.dataTransfer.files); }}
+                      className="border-2 border-dashed border-gray-200 rounded-lg p-3 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-colors">
+                      <p className="text-xs text-gray-400">Click or drag images here (optional)</p>
+                      <input ref={fileRef} type="file" accept="image/*" multiple className="hidden"
+                        onChange={e => handleFiles(e.target.files)} />
+                    </div>
+                    {attachments.length > 0 && (
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        {attachments.map((att, idx) => (
+                          <div key={idx} className="relative group">
+                            <img src={att.dataUrl} alt={att.fileName} className="w-16 h-16 object-cover rounded-lg border border-gray-200" />
+                            <button type="button"
+                              onClick={() => setAttachments(p => p.filter((_, i) => i !== idx))}
+                              className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white rounded-full text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">✕</button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleAction(activeAction, activeAction === 'follow-up' ? 'Follow-up added.' : 'Details submitted.')}
+                      disabled={submitting || !messageText.trim()}
+                      className="btn-primary text-sm">
+                      {submitting ? <><LoadingSpinner size="sm" /> Submitting…</> : 'Submit'}
+                    </button>
+                    <button onClick={closeAction} className="btn-secondary text-sm">Cancel</button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-wrap gap-3">
+                  <button onClick={() => setActiveAction('follow-up')}
+                    className="text-sm text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/>
+                    </svg>
+                    Add follow-up
+                  </button>
+                  <button onClick={() => setActiveAction('provide-details')}
+                    className="text-sm text-amber-600 hover:text-amber-700 font-medium flex items-center gap-1">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+                    </svg>
+                    Provide details
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Main dashboard ───────────────────────────────────────────────────────────
+export default function PortalDashboard() {
+  const { data: session, status } = useSession();
+  const router = useRouter();
+
+  // client_token user (email/password login)
+  const [clientUser,   setClientUser]   = useState(null);
+  const [authChecked,  setAuthChecked]  = useState(false);
+
+  const [tickets,      setTickets]      = useState([]);
+  const [loading,      setLoading]      = useState(true);
+  const [error,        setError]        = useState('');
+  const [showForm,     setShowForm]     = useState(false);
+  const [statusFilter, setStatusFilter] = useState('All');
+  const [emailToast,   setEmailToast]   = useState(null);
+
+  // Check client_token cookie (email/password users)
+  useEffect(() => {
+    fetch('/api/portal/client-auth/me')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data?.client) setClientUser(data.client); })
+      .catch(() => {})
+      .finally(() => setAuthChecked(true));
+  }, []);
+
+  // Redirect if neither auth method is active
+  useEffect(() => {
+    if (!authChecked) return;
+    if (status === 'loading') return;
+    if (!clientUser && status === 'unauthenticated') {
+      router.replace('/portal/login');
+    }
+  }, [authChecked, status, clientUser, router]);
+
+  // Prefer email/password (client_token) over Google — if both exist, client_token wins
+  // This ensures switching accounts via login page works correctly
+  const isGoogleUser  = status === 'authenticated' && !clientUser;
+  const activeUser    = clientUser
+    ? { name: clientUser.name, email: clientUser.email, image: null }
+    : isGoogleUser
+      ? { name: session.user.name, email: session.user.email, image: session.user.image }
+      : null;
+
+  const isReady = authChecked && (isGoogleUser || !!clientUser);
+
+  const fetchTickets = useCallback(async () => {
+    if (!isReady) return;
+    setLoading(true);
+    setError('');
+    try {
+      const res  = await fetch('/api/portal/tickets/my');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to load tickets');
+      setTickets(data.tickets || []);
+    } catch (err) { 
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [isReady]);
+
+  useEffect(() => { fetchTickets(); }, [fetchTickets]);
+
+  const handleNewTicket = (ticket, emailStatus) => {
+    setTickets((prev) => [ticket, ...prev]);
+    setShowForm(false);
+    if (emailStatus) {
+      setEmailToast({ sent: emailStatus.clientEmailSent });
+      setTimeout(() => setEmailToast(null), 5000);
+    }
+  };
+
+  const handleSignOut = async () => {
+    if (clientUser) {
+      // Email/password session — clear client_token cookie
+      await fetch('/api/portal/client-auth/logout', { method: 'POST' });
+      router.push('/portal/login');
+    } else {
+      // Google session
+      signOut({ callbackUrl: '/portal/login' });
+    }
+  };
+
+  const filtered = statusFilter === 'All'
+    ? tickets
+    : tickets.filter((t) => t.status === statusFilter);
+
+  const counts = {
+    All:           tickets.length,
+    Open:          tickets.filter((t) => t.status === 'Open').length,
+    'In Progress': tickets.filter((t) => t.status === 'In Progress').length,
+    Resolved:      tickets.filter((t) => t.status === 'Resolved').length,
+  };
+
+  // Show spinner while checking auth
+  if (!authChecked || status === 'loading' || (!activeUser && authChecked)) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <LoadingSpinner size="lg" />
+      </div>
+    );
+  }
+
+  if (!activeUser) return null;
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      {/* Navbar */}
+      <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
+        <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between gap-4">
+          <Link href="/" className="flex items-center gap-2">
+            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
+              <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M18.364 5.636l-3.536 3.536m0 5.656l3.536 3.536M9.172 9.172L5.636 5.636m3.536 9.192l-3.536 3.536M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-5 0a4 4 0 11-8 0 4 4 0 018 0z"/>
+              </svg>
+            </div>
+            <span className="font-bold text-gray-900 text-sm">HelpDesk</span>
+          </Link>
+
+          <div className="flex items-center gap-3">
+            {activeUser.image
+              ? <img src={activeUser.image} alt={activeUser.name} className="w-8 h-8 rounded-full border border-gray-200" referrerPolicy="no-referrer" />
+              : <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-sm font-bold flex-shrink-0">
+                  {activeUser.name?.charAt(0).toUpperCase()}
+                </div>
+            }
+            <div className="hidden sm:block text-right">
+              <p className="text-sm font-medium text-gray-900 leading-tight">{activeUser.name}</p>
+              <p className="text-xs text-gray-400 leading-tight">{activeUser.email}</p>
+            </div>
+            <button onClick={handleSignOut}
+              className="text-sm text-gray-500 hover:text-red-600 transition-colors px-2 py-1 rounded-lg hover:bg-red-50 font-medium">
+              Sign out
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <main className="max-w-4xl mx-auto px-4 py-8">
+        {/* Email notification toast */}
+        {emailToast !== null && (
+          <div className={`fixed top-4 right-4 z-50 flex items-start gap-3 px-4 py-3 rounded-xl shadow-lg border text-sm max-w-sm transition-all
+            ${emailToast.sent
+              ? 'bg-green-50 border-green-200 text-green-800'
+              : 'bg-amber-50 border-amber-200 text-amber-800'}`}>
+            <span className="text-lg leading-none mt-0.5">
+              {emailToast.sent ? '✉️' : '⚠️'}
+            </span>
+            <div className="flex-1">
+              <p className="font-semibold leading-snug">
+                {emailToast.sent ? 'Confirmation email sent' : 'Email not sent'}
+              </p>
+              <p className="text-xs mt-0.5 opacity-80">
+                {emailToast.sent
+                  ? `A confirmation was sent to ${activeUser.email}`
+                  : 'Your ticket was created, but the confirmation email could not be delivered. Check your spam folder or contact support.'}
+              </p>
+            </div>
+            <button onClick={() => setEmailToast(null)}
+              className="text-current opacity-50 hover:opacity-100 transition-opacity ml-1 mt-0.5"
+              aria-label="Dismiss">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/>
+              </svg>
+            </button>
+          </div>
+        )}
+        <div className="flex items-center justify-between mb-6 gap-4 flex-wrap">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">My Tickets</h1>
+            <p className="text-sm text-gray-500 mt-0.5">All support requests tied to your account</p>
+          </div>
+          <button onClick={() => setShowForm((p) => !p)}
+            className="btn-primary flex items-center gap-2">
+            {showForm ? (
+              <>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/>
+                </svg>
+                Cancel
+              </>
+            ) : (
+              <>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4"/>
+                </svg>
+                New Ticket
+              </>
+            )}
+          </button>
+        </div>
+
+        {/* New ticket form */}
+        {showForm && (
+          <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-6 mb-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">Submit a New Ticket</h2>
+            <TicketForm
+              clientEmail={activeUser.email}
+              onSuccess={handleNewTicket}
+              onCancel={() => setShowForm(false)}
+            />
+          </div>
+        )}
+
+        {/* Stats strip */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+          {Object.entries(counts).map(([label, count]) => (
+            <button key={label} onClick={() => setStatusFilter(label)}
+              className={`p-3 rounded-xl border text-left transition-colors ${
+                statusFilter === label
+                  ? 'bg-blue-50 border-blue-200'
+                  : 'bg-white border-gray-200 hover:bg-gray-50'
+              }`}>
+              <p className={`text-2xl font-bold ${statusFilter === label ? 'text-blue-700' : 'text-gray-900'}`}>{count}</p>
+              <p className={`text-xs mt-0.5 ${statusFilter === label ? 'text-blue-600' : 'text-gray-500'}`}>{label}</p>
+            </button>
+          ))}
+        </div>
+
+        {/* Ticket list */}
+        {loading ? (
+          <div className="flex items-center justify-center py-20">
+            <LoadingSpinner size="lg" />
+          </div>
+        ) : error ? (
+          <div className="bg-red-50 border border-red-200 rounded-xl p-6 text-center">
+            <p className="text-red-700 font-medium">{error}</p>
+            <button onClick={fetchTickets} className="mt-3 text-sm text-red-600 hover:text-red-700 underline">Try again</button>
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="bg-white border border-gray-200 rounded-xl p-12 text-center">
+            <svg className="w-12 h-12 text-gray-200 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+            </svg>
+            {statusFilter === 'All' ? (
+              <>
+                <p className="text-gray-500 font-medium">No tickets yet</p>
+                <p className="text-gray-400 text-sm mt-1">Click "New Ticket" above to get support.</p>
+              </>
+            ) : (
+              <p className="text-gray-500 font-medium">No {statusFilter.toLowerCase()} tickets</p>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {filtered.map((ticket) => (
+              <TicketCard
+                key={ticket.id}
+                ticket={ticket}
+                clientEmail={activeUser.email}
+              />
+            ))}
+          </div>
+        )}
+      </main>
+    </div>
   );
 }
 </file>
@@ -9900,7 +9928,10 @@ export default function TicketDetailPage() {
                 onChange={(e) => handleUpdate('status', e.target.value)}
                 disabled={updating || (ticket.status === 'Signed Off' && user?.role !== 'Admin')}
                 className="input-field mt-1">
-                {(user?.role === 'Admin' ? STATUS_OPTIONS_ADMIN : STATUS_OPTIONS).map((s) => (
+                {(user?.role === 'Admin'
+                  ? (ticket.status === 'Resolved' ? STATUS_OPTIONS_ADMIN : STATUS_OPTIONS_ADMIN.filter(s => s !== 'Signed Off'))
+                  : STATUS_OPTIONS
+                ).map((s) => (
                   <option key={s} value={s}>{s}</option>
                 ))}
               </select>
@@ -10363,7 +10394,7 @@ const priorityColor = (p) => ({
 
 /** "Open Dashboard" button — appended to every admin-facing email */
 const dashboardBtn = () => {
-  const url = `${process.env.NEXTAUTH_URL || 'http://localhost:3000'}/admin`;
+  const url = `${process.env.NEXTAUTH_URL || 'http://localhost:3000'}/login`;
   return `
 <div style="text-align:center;margin-top:24px;padding-top:20px;border-top:1px solid #e2e8f0;">
   <a href="${url}"
@@ -10912,8 +10943,8 @@ export async function sendTicketSignedOff(ticket, admin, resolver) {
     }));
   }
 
-  // Admin + Resolver internal notification
-  const internalHtml = base(`
+  // Admin + Resolver internal notification — separate buttons for each
+  const adminHtml = base(`
     <h2 style="color:#1e293b;font-size:18px;margin:0 0 8px;">Ticket signed off ✅</h2>
     <p style="color:#475569;margin:0 0 20px;">
       <strong>${admin.name}</strong> (Admin) has signed off ticket #${formatTicketNumber(ticket.ticketNumber)}.
@@ -10934,9 +10965,36 @@ export async function sendTicketSignedOff(ticket, admin, resolver) {
     ${dashboardBtn()}
   `);
 
-  if (adminEmail) results.push(send({ to: adminEmail, subject: `[HelpDesk] Ticket signed off — ${ticket.subject}`, html: internalHtml }));
+  const resolverAppUrl = process.env.NEXTAUTH_URL || 'http://localhost:3000';
+  const resolverHtml = base(`
+    <h2 style="color:#1e293b;font-size:18px;margin:0 0 8px;">Ticket signed off ✅</h2>
+    <p style="color:#475569;margin:0 0 20px;">
+      <strong>${admin.name}</strong> (Admin) has signed off ticket #${formatTicketNumber(ticket.ticketNumber)} that you resolved.
+      The client has been notified.
+    </p>
+    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:16px;margin-bottom:16px;">
+      <table style="width:100%;border-collapse:collapse;font-size:14px;">
+        <tr><td style="color:#94a3b8;padding:4px 0;width:110px;">Ticket #</td>
+            <td style="font-family:monospace;font-weight:700;color:#166534;">#${formatTicketNumber(ticket.ticketNumber)}</td></tr>
+        <tr><td style="color:#94a3b8;padding:4px 0;">Subject</td>
+            <td style="color:#1e293b;font-weight:600;">${ticket.subject}</td></tr>
+        <tr><td style="color:#94a3b8;padding:4px 0;">Resolved by</td>
+            <td style="color:#1e293b;">You (${resolver?.name})</td></tr>
+        <tr><td style="color:#94a3b8;padding:4px 0;">Signed off by</td>
+            <td style="color:#1e293b;">${admin.name}</td></tr>
+      </table>
+    </div>
+    <div style="text-align:center;margin-top:24px;padding-top:20px;border-top:1px solid #e2e8f0;">
+      <a href="${resolverAppUrl}/dashboard"
+        style="display:inline-block;background:#2563eb;color:#fff;text-decoration:none;font-weight:600;font-size:14px;padding:10px 28px;border-radius:8px;">
+        View My Dashboard →
+      </a>
+    </div>
+  `);
+
+  if (adminEmail) results.push(send({ to: adminEmail, subject: `[HelpDesk] Ticket signed off — ${ticket.subject}`, html: adminHtml }));
   if (resolver?.email && resolver.email.toLowerCase() !== adminEmail?.toLowerCase()) {
-    results.push(send({ to: resolver.email, subject: `[HelpDesk] Your resolved ticket was signed off — ${ticket.subject}`, html: internalHtml }));
+    results.push(send({ to: resolver.email, subject: `[HelpDesk] Your resolved ticket was signed off — ${ticket.subject}`, html: resolverHtml }));
   }
 
   await Promise.allSettled(results);
@@ -11071,9 +11129,24 @@ export async function PATCH(request, { params }) {
     if (category && user.role !== 'Admin') {
       return NextResponse.json({ error: 'Only admins can change the category.' }, { status: 403 });
     }
-    // Only admins can sign off a ticket
+    // TeamMembers AND Admins can only change normal status (Open/In Progress/Resolved)
+    // on tickets assigned to them.
+    // Exception: Admin can sign off any Resolved ticket, and reopen any Signed Off ticket.
+    const NORMAL_STATUSES = new Set(['Open', 'In Progress', 'Resolved']);
+    if (status && NORMAL_STATUSES.has(status) && ticket.status !== 'Signed Off') {
+      // This is a normal status change — user must be assigned
+      const isAssigned = ticket.assignees?.some(a => a.userId === user.id);
+      if (!isAssigned) {
+        const who = user.role === 'Admin' ? 'Admins' : 'Team members';
+        return NextResponse.json({ error: `${who} can only change the status of tickets assigned to them.` }, { status: 403 });
+      }
+    }
+    // Only admins can sign off a ticket, and only when it's Resolved
     if (status === 'Signed Off' && user.role !== 'Admin') {
       return NextResponse.json({ error: 'Only admins can sign off tickets.' }, { status: 403 });
+    }
+    if (status === 'Signed Off' && ticket.status !== 'Resolved') {
+      return NextResponse.json({ error: 'Only Resolved tickets can be signed off.' }, { status: 400 });
     }
     // A Signed Off ticket can only be reopened by an admin
     if (ticket.status === 'Signed Off' && status && status !== 'Signed Off' && user.role !== 'Admin') {

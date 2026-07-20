@@ -452,17 +452,27 @@ export default function TicketTable({
 
                   {/* Status dropdown */}
                   <td className="py-3 pr-4">
-                    {updatingId === ticket.id && updatingField === 'status' ? <LoadingSpinner size="sm" /> : (
-                      <select
-                        value={ticket.status}
-                        onChange={(e) => handleStatusChange(ticket.id, e.target.value, e)}
-                        className="text-xs border border-gray-200 rounded-md px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400 cursor-pointer"
-                        aria-label={`Status for ${ticket.subject}`}
-                        disabled={updatingId === ticket.id || ticket.status === 'Signed Off' && !isAdmin}
-                      >
-                        {(isAdmin ? STATUS_OPTIONS_ADMIN : STATUS_OPTIONS).map((s) => <option key={s} value={s}>{s}</option>)}
-                      </select>
-                    )}
+                    {updatingId === ticket.id && updatingField === 'status' ? <LoadingSpinner size="sm" /> : (() => {
+                      const isAssigned = ticket.assignees?.some(a => a.id === userRole ? false : true);
+                      const teamMemberCanChange = userRole !== 'TeamMember' || ticket.assignees?.some(a => a.userId !== undefined);
+                      // Build available options: admin sees Signed Off only when ticket is Resolved
+                      const availableStatuses = isAdmin
+                        ? (ticket.status === 'Resolved'
+                            ? STATUS_OPTIONS_ADMIN
+                            : STATUS_OPTIONS_ADMIN.filter(s => s !== 'Signed Off'))
+                        : STATUS_OPTIONS;
+                      return (
+                        <select
+                          value={ticket.status}
+                          onChange={(e) => handleStatusChange(ticket.id, e.target.value, e)}
+                          className="text-xs border border-gray-200 rounded-md px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400 cursor-pointer"
+                          aria-label={`Status for ${ticket.subject}`}
+                          disabled={updatingId === ticket.id || (ticket.status === 'Signed Off' && !isAdmin)}
+                        >
+                          {availableStatuses.map((s) => <option key={s} value={s}>{s}</option>)}
+                        </select>
+                      );
+                    })()}
                   </td>
 
                   {/* Multi-team reassign — Admin only */}
