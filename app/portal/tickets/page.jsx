@@ -300,7 +300,7 @@ function TicketCard({ ticket, clientEmail, onFollowUpSuccess }) {
                   <p className="text-sm leading-snug whitespace-pre-wrap text-indigo-900">{ticket.draftResponse}</p>
                 </div>
               )}
-              {ticket.activities?.map(act => {
+              {[...(ticket.activities || [])].reverse().map(act => {
                 const isClientMessage = act.action === 'details_provided' || act.action === 'follow_up_added';
                 return (
                   <div key={act.id} className={`rounded-lg p-3.5 ${isClientMessage
