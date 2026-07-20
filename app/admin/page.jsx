@@ -21,6 +21,8 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [allUsers, setAllUsers] = useState([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchField, setSearchField] = useState('all'); // 'all' | 'ticketNumber' | 'subject' | 'email'
   const [filters, setFilters] = useState({
     status: '',
     category: '',
@@ -85,7 +87,7 @@ export default function AdminPage() {
     fetchTickets();
   }, [fetchTickets]);
 
-  // Client-side filtering
+  // Client-side filtering + search
   useEffect(() => {
     let result = [...tickets];
     if (filters.status) result = result.filter((t) => t.status === filters.status);
@@ -94,8 +96,32 @@ export default function AdminPage() {
     if (filters.team) result = result.filter((t) =>
       (t.assignedTeams ?? (t.assignedTeam ? [t.assignedTeam] : [])).includes(filters.team)
     );
+
+    // Search
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      result = result.filter((t) => {
+        if (searchField === 'ticketNumber') {
+          return String(t.ticketNumber ?? '').padStart(3, '0').includes(q.replace('#', ''));
+        }
+        if (searchField === 'subject') {
+          return t.subject.toLowerCase().includes(q);
+        }
+        if (searchField === 'email') {
+          return (t.clientEmail || '').toLowerCase().includes(q);
+        }
+        // 'all' — search across all fields
+        return (
+          String(t.ticketNumber ?? '').padStart(3, '0').includes(q.replace('#', '')) ||
+          t.subject.toLowerCase().includes(q) ||
+          (t.clientEmail || '').toLowerCase().includes(q) ||
+          (t.category || '').toLowerCase().includes(q)
+        );
+      });
+    }
+
     setFilteredTickets(result);
-  }, [tickets, filters]);
+  }, [tickets, filters, searchQuery, searchField]);
 
   const handleFilterChange = (key, value) => {
     setFilters((prev) => ({ ...prev, [key]: value }));
@@ -264,6 +290,46 @@ export default function AdminPage() {
                     </span>
                   </h2>
                 </div>
+
+                {/* Search box */}
+                <div className="flex items-center gap-2">
+                  <div className="relative flex-1 max-w-sm">
+                    <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                    </svg>
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={e => setSearchQuery(e.target.value)}
+                      placeholder={
+                        searchField === 'ticketNumber' ? 'Search by ticket # (e.g. 001)…' :
+                        searchField === 'subject'      ? 'Search by subject…' :
+                        searchField === 'email'        ? 'Search by client email…' :
+                                                         'Search tickets…'
+                      }
+                      className="w-full pl-9 pr-4 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
+                    />
+                    {searchQuery && (
+                      <button onClick={() => setSearchQuery('')}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/>
+                        </svg>
+                      </button>
+                    )}
+                  </div>
+                  <select
+                    value={searchField}
+                    onChange={e => setSearchField(e.target.value)}
+                    className="text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-400 text-gray-700"
+                  >
+                    <option value="all">All fields</option>
+                    <option value="ticketNumber">Ticket #</option>
+                    <option value="subject">Subject</option>
+                    <option value="email">Client Email</option>
+                  </select>
+                </div>
+
                 <FilterBar
                   filters={filters}
                   onChange={handleFilterChange}
@@ -277,8 +343,8 @@ export default function AdminPage() {
                 userRole={user.role}
                 userTeam={user.team}
                 allUsers={allUsers}
-                hasActiveFilters={!!(filters.status || filters.category || filters.priority || filters.team)}
-                onClearFilters={() => setFilters({ status: '', category: '', priority: '', team: '' })}
+                hasActiveFilters={!!(filters.status || filters.category || filters.priority || filters.team || searchQuery)}
+                onClearFilters={() => { setFilters({ status: '', category: '', priority: '', team: '' }); setSearchQuery(''); }}
                 onTicketDeleted={(deletedId) => {
                   setTickets((prev) => prev.filter((t) => t.id !== deletedId));
                 }}

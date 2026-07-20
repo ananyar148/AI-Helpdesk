@@ -212,8 +212,9 @@ export async function GET(request) {
       ];
     }
 
-    // Never show soft-deleted tickets
+    // Never show soft-deleted tickets or signed-off tickets in normal view
     where.deletedAt = null;
+    where.status    = { not: 'Signed Off' };
 
     if (status)                        where.status   = status;
     if (category)                      where.category = category;
