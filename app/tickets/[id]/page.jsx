@@ -440,7 +440,6 @@ export default function TicketDetailPage() {
                   ℹ️ Out of Scope tickets can be resolved directly by admins.
                 </p>
               )}
-              </select>
               {ticket.status === 'Signed Off' && user?.role !== 'Admin' && (
                 <p className="text-xs text-amber-600 mt-1">Only an admin can change the status of a signed-off ticket.</p>
               )}
